@@ -1,4 +1,4 @@
-/* PMJ 4D – v0.6
+/* PMJ 4D – v0.7
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -424,6 +424,24 @@ async function loadKids(byModel) {
     await Promise.all(Array.from({ length: 8 }, worker));
   }
 }
+/** Överordnade objekt (projekt, byggnad, våning, assembly …) till element med status.
+ *  Döljs de, döljer Connect allt under dem – därför lämnas de alltid orörda. */
+const PARENT_TYPES = [1, 2, 3, 4, 5];   // SpatialHierarchy, SpatialContainment, Containment, ElementAssembly, Group
+async function loadAncestors(byModel) {
+  const set = new Set();
+  for (const [modelId, ids] of byModel) {
+    for (const type of PARENT_TYPES) {
+      for (let i = 0; i < ids.length; i += 5000) {
+        try {
+          const parents = await S.api.viewer.getHierarchyParents(modelId, ids.slice(i, i + 5000), type, true, false);
+          for (const p of parents || []) set.add(modelId + ":" + p.id);
+        } catch { /* hierarkityp saknas i modellen */ }
+      }
+    }
+  }
+  return set;
+}
+
 /** Lägg till delarna till en {modelId -> ids}-karta (för färg och synlighet). */
 function withKids(byModel) {
   const out = new Map();
@@ -465,11 +483,15 @@ async function colorModel() {
   }
   await loadKids(tracked);
   const claimed = claimedKids(tracked);
+  const parents = await loadAncestors(tracked);
+  let skipped = 0;
   for (const [modelId, ids] of rest) for (const rid of ids) {
     if (claimed.has(modelId + ":" + rid)) continue;          // del av ett element med status
+    if (parents.has(modelId + ":" + rid)) { skipped++; continue; }   // våning/byggnad o.d. – får aldrig döljas
     if (!S.groups.has(NONE)) S.groups.set(NONE, new Map());
     addTo(S.groups.get(NONE), modelId, rid);
   }
+  log(`Översikt: ${skipped} överordnade objekt (byggnad, våningar o.d.) lämnas orörda; ${claimed.size} delar följer sina element.`);
   await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
   for (const [v, byModel] of S.groups) {
     const color = colorFor(v);
@@ -739,7 +761,8 @@ async function buildTimeline() {
   for (const e of elements) addTo(trackedMap, e.modelId, e.rid);
   await loadKids(trackedMap);
   const claimed = claimedKids(trackedMap);
-  for (const [modelId, ids] of untracked) untracked.set(modelId, ids.filter((r) => !claimed.has(modelId + ":" + r)));
+  const parents = await loadAncestors(trackedMap);
+  for (const [modelId, ids] of untracked) untracked.set(modelId, ids.filter((r) => !claimed.has(modelId + ":" + r) && !parents.has(modelId + ":" + r)));
   const dates = elements.flatMap((e) => [e.sent, e.made, e.installed, e.planned]).filter(Boolean);
   if (!dates.length) return (S.tl = { elements, untracked, weeks: [], sel: -1 });
 

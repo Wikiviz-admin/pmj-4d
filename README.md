@@ -1,4 +1,4 @@
-# PMJ 4D – v0.6
+# PMJ 4D – v0.7
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -61,7 +61,7 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - *Hela kedjan:* visar hur långt varje element har kommit vid veckans slut: ritningar skickade (cyan), tillverkat (mörkblått), monterat (grönt) eller ej påbörjat (grått).
 - Element utan PMJ-data visas ljusgrå som bakgrund.
 
-**Element och delar:** PMJ-statusen sitter på elementet (Teklas cast unit). Elementets delar får samma färg och döljs eller visas tillsammans med elementet, och de räknas inte som "utan status".
+**Element och delar:** PMJ-statusen sitter på elementet (Teklas cast unit). Elementets delar får samma färg och döljs eller visas tillsammans med elementet, och de räknas inte som "utan status". Överordnade objekt i modellstrukturen (projekt, byggnad, våningar) lämnas alltid orörda, eftersom Connect annars döljer allt under dem.
 
 Om något går fel: öppna *Felsökning*, klicka *Kopiera logg* och klistra in loggen till Claude.
 
