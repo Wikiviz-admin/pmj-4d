@@ -1,9 +1,9 @@
 {
   "title": "PMJ 4D",
   "description": "Fyll i och visualisera PMJ Rakennusosan Status (spike)",
-  "url": "https://DITT-GITHUB-NAMN.github.io/pmj-4d/index.html",
-  "icon": "https://DITT-GITHUB-NAMN.github.io/pmj-4d/icon.svg",
-  "infoUrl": "https://DITT-GITHUB-NAMN.github.io/pmj-4d/README.md",
+  "url": "https://wikiviz-admin.github.io/pmj-4d/index.html",
+  "icon": "https://wikiviz-admin.github.io/pmj-4d/icon.svg",
+  "infoUrl": "https://wikiviz-admin.github.io/pmj-4d/README.md",
   "extensionType": ["3dviewer"],
   "enabled": true
 }
