@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PMJ 4D</title>
+<style>
+  :root {
+    --cyan:#00c3dc; --blue:#00a7db; --navy:#006393;
+    --ink:#1f2a33; --muted:#71808c; --line:#e3e8ec; --soft:#f4f8fa;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.45 "Open Sans",Segoe UI,Arial,sans-serif; color:var(--ink); background:#fff; }
+  button { font:inherit; cursor:pointer; }
+  [hidden] { display:none !important; }
+
+  /* Huvud */
+  header { display:flex; align-items:center; gap:10px; padding:10px 12px 8px; }
+  header img { height:26px; }
+  header .name { font-weight:700; color:var(--navy); letter-spacing:.02em; font-size:15px; }
+  header .sp { flex:1; }
+  .dot { width:9px; height:9px; border-radius:50%; background:#f2b705; }
+  .dot.ok { background:#3aa845; } .dot.bad { background:#d64545; }
+  .icon { background:none; border:0; color:var(--muted); padding:4px 6px; border-radius:4px; font-size:12px; }
+  .icon:hover { background:var(--soft); color:var(--navy); }
+  .stripe { height:4px; background:linear-gradient(90deg,var(--cyan) 0 38%, #fff 38% 39%, var(--blue) 39% 61%, #fff 61% 62%, var(--navy) 62%); }
+
+  /* Flikar */
+  nav { display:flex; border-bottom:1px solid var(--line); }
+  nav button { flex:1; background:none; border:0; padding:10px 0 8px; color:var(--muted); font-weight:600; border-bottom:3px solid transparent; }
+  nav button.on { color:var(--navy); border-bottom-color:var(--blue); }
+  main { padding:12px; }
+
+  /* Knappar */
+  .btn { background:var(--navy); color:#fff; border:0; border-radius:6px; padding:8px 14px; font-weight:600; }
+  .btn:hover { background:#00557f; }
+  .btn.ghost { background:#fff; color:var(--navy); border:1px solid var(--line); font-weight:400; }
+  .btn.full { width:100%; padding:11px; margin-top:12px; }
+  .btn:disabled { opacity:.45; cursor:default; }
+  .bar { display:flex; gap:8px; margin-bottom:12px; }
+
+  /* Statuskort (översikt) */
+  .cards { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .card { text-align:left; background:var(--soft); border:0; border-radius:8px; padding:9px 10px 8px; position:relative; overflow:hidden; }
+  .card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--c); }
+  .card .n { font-size:20px; font-weight:700; color:var(--ink); line-height:1.1; }
+  .card .t { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+  .card.off { opacity:.4; }
+  .card.off .n { text-decoration:line-through; }
+  .empty { color:var(--muted); text-align:center; padding:24px 8px; background:var(--soft); border-radius:8px; }
+  .hint { font-size:11px; color:var(--muted); margin-top:8px; }
+
+  /* Fyll i */
+  .sel { font-size:22px; font-weight:700; color:var(--navy); }
+  .sel small { font-size:12px; font-weight:400; color:var(--muted); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:10px; }
+  .st { border:2px solid transparent; border-radius:8px; padding:9px 6px; background:var(--soft); font-weight:600; font-size:12px; display:flex; align-items:center; gap:7px; }
+  .st i { width:12px; height:12px; border-radius:3px; background:var(--c); flex:none; }
+  .st.on { border-color:var(--navy); background:#fff; }
+  .row { display:flex; gap:6px; margin-top:12px; } .row > * { flex:1; min-width:0; }
+  label { display:block; font-size:11px; color:var(--muted); margin:0 0 3px; }
+  input[type=text], input[type=date], select { width:100%; padding:7px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
+  .switch { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:12px; color:var(--muted); }
+
+  /* Inställningar & felsökning */
+  .drawer { background:var(--soft); border-bottom:1px solid var(--line); padding:12px; }
+  .drawer h3 { margin:0 0 8px; font-size:12px; color:var(--navy); }
+  .drawer .f { margin-bottom:9px; }
+  .drawer .btn { padding:6px 12px; }
+  #log { background:#fff; border:1px solid var(--line); border-radius:6px; height:220px; overflow:auto; font:11px/1.35 Consolas,monospace; padding:6px; white-space:pre-wrap; word-break:break-all; margin:0 0 8px; }
+  #log .e { color:#b00020; } #log .r { color:var(--navy); }
+</style>
+</head>
+<body>
+<header>
+  <img src="logo.png" alt="PMJ Service">
+  <span class="name">4D</span>
+  <span class="sp"></span>
+  <span id="dot" class="dot" title=""></span>
+  <button id="btnLang" class="icon" title="Kieli / Språk">FI</button>
+  <button id="btnSetup" class="icon" title="">⚙</button>
+</header>
+<div class="stripe"></div>
+
+<div id="setup" class="drawer" hidden>
+  <h3 data-t="setupTitle"></h3>
+  <div class="f"><label for="libId" data-t="libId"></label>
+    <div class="row" style="margin:0"><input id="libId" type="text" placeholder="4d13376b0d38…"><button id="btnLib" class="btn" style="flex:none" data-t="load"></button></div></div>
+  <div class="row" style="margin:0 0 9px">
+    <div><label for="defId" data-t="pset"></label><select id="defId"><option value="">–</option></select></div>
+    <div><label for="statusKey" data-t="statusField"></label><select id="statusKey"><option value="">–</option></select></div>
+  </div>
+  <div class="f"><label for="linkTpl" data-t="linkTpl"></label><input id="linkTpl" type="text" placeholder="frn:…{guid}">
+    <div class="hint" data-t="linkHint"></div>
+    <button id="btnDiscover" class="btn ghost" style="margin-top:6px" data-t="discover"></button></div>
+  <div class="f"><label for="region" data-t="region"></label>
+    <select id="region">
+      <option value="https://pset-api.eu-west-1.connect.trimble.com/v1">EU (eu-west-1)</option>
+      <option value="https://pset-api.connect.trimble.com/v1">Global</option>
+      <option value="https://pset-api.us-east-1.connect.trimble.com/v1">US (us-east-1)</option>
+    </select></div>
+  <button id="btnSetupDone" class="btn" data-t="done"></button>
+</div>
+
+<nav>
+  <button id="tabView" class="on" data-t="tabView"></button>
+  <button id="tabFill" data-t="tabFill"></button>
+</nav>
+
+<main>
+  <div id="paneView">
+    <div class="bar">
+      <button id="btnColor" class="btn" data-t="refresh"></button>
+      <button id="btnReset" class="btn ghost" data-t="clear"></button>
+    </div>
+    <div id="cards" class="cards"></div>
+    <div id="cardsEmpty" class="empty" data-t="emptyView"></div>
+    <div id="cardsHint" class="hint" data-t="cardsHint" hidden></div>
+  </div>
+
+  <div id="paneFill" hidden>
+    <div class="sel"><span id="selCount">0</span> <small data-t="selected"></small></div>
+    <div id="statusGrid" class="grid"></div>
+    <div class="row">
+      <div><label for="dateKey" data-t="dateField"></label><select id="dateKey"><option value="">–</option></select></div>
+      <div><label for="dateVal" data-t="date"></label><input id="dateVal" type="date"></div>
+    </div>
+    <label class="switch"><input type="checkbox" id="live"> <span data-t="live"></span></label>
+    <button id="btnWrite" class="btn full"></button>
+  </div>
+</main>
+
+<div style="padding:0 12px 10px"><button id="btnDebug" class="icon" data-t="debug"></button></div>
+<div id="debug" class="drawer" hidden>
+  <pre id="log"></pre>
+  <button id="btnProps" class="btn ghost" data-t="props"></button>
+  <button id="btnCopy" class="btn ghost" data-t="copy"></button>
+  <button id="btnClear" class="btn ghost" data-t="clearLog"></button>
+  <button id="btnToken" class="btn ghost" data-t="token"></button>
+</div>
+
+<script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
