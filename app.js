@@ -1,4 +1,4 @@
-/* PMJ 4D – v0.2
+/* PMJ 4D – v0.4
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -33,6 +33,10 @@ const T = {
     none: "Utan status", debug: "Felsökning", props: "Objektets egenskaper", copy: "Kopiera logg",
     clearLog: "Töm logg", token: "Ny token", needSetup: "Gör inställningarna först (⚙).",
     stOk: "Ansluten", stWait: "Väntar på åtkomst", stBad: "Ingen anslutning", settings: "Inställningar",
+    autoDates: "Fyll i dagens datum automatiskt (bara om fältet är tomt)",
+    autoHint: (f) => `+ ${f} = idag`, weekHint: (f) => `+ ${f} räknas ut`,
+    brush: "🖌 Penselläge – klicka på element i 3D", brushTest: "🖌 Penselläge (provkörning)",
+    brushOn: (n) => `🖌 Pensel på · ${n} sparade · klicka för att stänga`, pickFirst: "🖌 Välj en status först",
   },
   fi: {
     setupTitle: "Asetukset", libId: "Kirjaston tunnus (PMJ master library)", load: "Lataa",
@@ -48,6 +52,10 @@ const T = {
     none: "Ei tilaa", debug: "Vianetsintä", props: "Osan ominaisuudet", copy: "Kopioi loki",
     clearLog: "Tyhjennä loki", token: "Uusi token", needSetup: "Tee ensin asetukset (⚙).",
     stOk: "Yhdistetty", stWait: "Odottaa lupaa", stBad: "Ei yhteyttä", settings: "Asetukset",
+    autoDates: "Täytä tämä päivä automaattisesti (vain jos kenttä on tyhjä)",
+    autoHint: (f) => `+ ${f} = tänään`, weekHint: (f) => `+ ${f} lasketaan`,
+    brush: "🖌 Sivellintila – klikkaa osia 3D:ssä", brushTest: "🖌 Sivellintila (koeajo)",
+    brushOn: (n) => `🖌 Sivellin päällä · ${n} tallennettu · sulje klikkaamalla`, pickFirst: "🖌 Valitse ensin tila",
   },
 };
 let LANG = "sv";
@@ -62,7 +70,12 @@ const S = {
   hidden: new Set(),   // dolda statusar
   pick: "",            // vald status i "Fyll i"
   selCount: 0,
+  fields: {},          // upptäckta fältnycklar: sent, made, installed, plannedDate, plannedWeek
+  brush: { on: false, timer: null, sig: "", done: new Set(), count: 0, busy: false },
 };
+
+// Vilket datumfält som fylls i automatiskt för en viss status
+const AUTO_DATE_FOR = { "PIIRUSTUS OK": "sent", "VALMISTETTU": "made", "ASENNETTU": "installed" };
 const $ = (id) => document.getElementById(id);
 
 // ---------- Logg ----------
@@ -82,8 +95,8 @@ function flash(msg) { const d = $("dot"); d.title = msg; }
 
 // ---------- Inställningar ----------
 const store = {
-  get(k) { try { return localStorage.getItem("pmj4d." + k) || ""; } catch { return ""; } },
-  set(k, v) { try { localStorage.setItem("pmj4d." + k, v); } catch { /* blockerad i iframe */ } },
+  get(k) { try { return localStorage.getItem("pmj4d." + skey(k)) || ""; } catch { return ""; } },
+  set(k, v) { try { localStorage.setItem("pmj4d." + skey(k), v); } catch { /* blockerad i iframe */ } },
 };
 function setupComplete() { return $("libId").value.trim() && $("defId").value && $("linkTpl").value.trim(); }
 
@@ -153,6 +166,15 @@ function flattenI18n(i18n) {
   for (const [k, v] of Object.entries(src)) if (typeof v === "string") flat[k] = v;
   return flat;
 }
+const squash = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function isoWeek(ymd) {
+  const d = new Date(ymd + "T12:00:00Z");
+  const day = (d.getUTCDay() + 6) % 7;            // mån = 0
+  d.setUTCDate(d.getUTCDate() - day + 3);          // torsdag samma vecka
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  return 1 + Math.round(((d - firstThu) / 864e5 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+}
+function todayYmd() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 const label = (k) => S.labels[`${k}.name`] || S.labels[`${k}.title`] || S.labels[`${k}.label`] || S.labels[k] || k;
 
 async function loadLibrary() {
@@ -184,6 +206,16 @@ async function loadDefinition() {
   const saved = store.get("statusKey");
   const auto = enumKeys.includes(saved) ? saved : enumKeys.find((k) => /kokoonpanon/i.test(k + " " + label(k))) || enumKeys[0];
   if (auto) $("statusKey").value = auto;
+  // Hitta PMJ-fälten via namn (tål att de interna nycklarna skiljer sig från rubrikerna)
+  const find = (re) => keys.find((k) => re.test(squash(label(k))) || re.test(squash(k)));
+  S.fields = {
+    sent: find(/^piirustu(kset|s)lahetetty/),
+    made: find(/^valmistuspaivamaara/),
+    installed: find(/^asennuspaivamaara/),
+    plannedDate: find(/^suunniteltuasennuspaiva/),
+    plannedWeek: find(/^suunniteltuasennusviikko/),
+  };
+  log({ upptäckta_fält: S.fields });
   fillSelect($("dateKey"), dateKeys, label, "–");
   const savedDate = store.get("dateKey"); if (dateKeys.includes(savedDate)) $("dateKey").value = savedDate;
   renderStatusGrid();
@@ -361,16 +393,30 @@ function renderStatusGrid() {
     b.style.setProperty("--c", colorFor(v));
     b.innerHTML = "<i></i><span></span>";
     b.querySelector("span").textContent = statusName(v);
-    b.onclick = () => { S.pick = S.pick === v ? "" : v; renderStatusGrid(); };
+    b.onclick = () => { S.pick = S.pick === v ? "" : v; if (!S.pick && S.brush.on) stopBrush(); renderStatusGrid(); };
     grid.appendChild(b);
   }
+  renderAutoHint();
   renderWriteButton();
+}
+function renderAutoHint() {
+  const lines = [];
+  const auto = autoDateKey(S.pick);
+  if (auto && $("autoDates").checked && auto !== $("dateKey").value) lines.push(t("autoHint", label(auto)));
+  if ($("dateKey").value && $("dateKey").value === S.fields.plannedDate && S.fields.plannedWeek) lines.push(t("weekHint", label(S.fields.plannedWeek)));
+  $("autoHint").textContent = lines.join("   ");
+  $("autoHint").hidden = !lines.length;
 }
 function renderWriteButton() {
   const btn = $("btnWrite");
   btn.textContent = $("live").checked ? t("save", S.selCount) : t("test", S.selCount);
-  btn.disabled = !S.selCount || (!S.pick && !($("dateKey").value && $("dateVal").value));
+  btn.disabled = S.brush.on || !S.selCount || (!S.pick && !($("dateKey").value && $("dateVal").value));
+  const br = $("btnBrush");
+  br.classList.toggle("on", S.brush.on);
+  br.disabled = !S.brush.on && !S.pick;
+  br.textContent = S.brush.on ? t("brushOn", S.brush.count) : !S.pick ? t("pickFirst") : $("live").checked ? t("brush") : t("brushTest");
 }
+const autoDateKey = (status) => S.fields[AUTO_DATE_FOR[String(status || "").toUpperCase()]] || null;
 
 function formatDate(key, ymd) {
   if (S.psetIndex) for (const p of S.psetIndex.values()) {
@@ -380,34 +426,211 @@ function formatDate(key, ymd) {
   return (S.props[key] || {}).format === "date" ? ymd : `${ymd}T00:00:00.000Z`;
 }
 
-async function writeSelected() {
-  const libId = $("libId").value.trim(), defId = $("defId").value, tpl = $("linkTpl").value.trim();
-  if (!setupComplete()) { openSetup(true); log(t("needSetup"), "e"); return; }
+/** Bygg värdena för ett objekt. Automatiska datum skriver aldrig över ett befintligt datum. */
+function propsFor(existing) {
   const props = {};
   if (S.pick) props[$("statusKey").value] = S.pick;
   const dk = $("dateKey").value, dv = $("dateVal").value;
-  if (dk && dv) props[dk] = formatDate(dk, dv);
-  if (!Object.keys(props).length) return;
+  if (dk && dv) {
+    props[dk] = formatDate(dk, dv);
+    if (dk === S.fields.plannedDate && S.fields.plannedWeek) props[S.fields.plannedWeek] = isoWeek(dv);
+  }
+  const auto = autoDateKey(S.pick);
+  if (auto && $("autoDates").checked && !(auto in props) && !(existing && existing[auto])) props[auto] = formatDate(auto, todayYmd());
+  return props;
+}
 
-  const objs = await selectedObjects();
-  if (!objs.length) return;
+/** Skriv till en lista objekt. Returnerar {ok, fail}. */
+async function writeObjects(objs) {
+  const libId = $("libId").value.trim(), defId = $("defId").value, tpl = $("linkTpl").value.trim();
   const live = $("live").checked;
-  log(`${live ? "SPARAR" : "PROVKÖRNING"}: ${short(props, 300)} på ${objs.length} objekt.`);
+  const index = await loadPsetIndex(false);       // behövs för att se vilka datum som redan finns
   let ok = 0, fail = 0;
   const queue = objs.slice();
   async function worker() {
     while (queue.length) {
       const o = queue.shift();
-      const path = `/psets/${encLink(buildLink(tpl, o.forms, o.modelId))}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`;
+      const link = buildLink(tpl, o.forms, o.modelId);
+      const props = propsFor(index.get(link));
+      if (!Object.keys(props).length) continue;
+      const path = `/psets/${encLink(link)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`;
       if (!live) { log(`(prov) PATCH ${psetBase()}${path}  ${short({ props }, 300)}`); ok++; continue; }
-      try { await pset("PATCH", path, { props }); ok++; } catch (e) { fail++; log(`Fel för ${o.forms.guid}: ${e.message}`, "e"); }
+      try {
+        await pset("PATCH", path, { props });
+        index.set(link, { ...(index.get(link) || {}), ...props });   // håll lokala kopian i takt
+        ok++;
+      } catch (e) { fail++; log(`Fel för ${o.forms.guid}: ${e.message}`, "e"); }
     }
   }
   await Promise.all([worker(), worker(), worker(), worker()]);
+  return { ok, fail, live };
+}
+
+async function writeSelected() {
+  if (!setupComplete()) { openSetup(true); log(t("needSetup"), "e"); return; }
+  const objs = await selectedObjects();
+  if (!objs.length) return;
+  log(`${$("live").checked ? "SPARAR" : "PROVKÖRNING"} på ${objs.length} objekt.`);
+  const { ok, fail, live } = await writeObjects(objs);
   log(`Klart: ${ok} ok, ${fail} fel.`);
   if (!live) { openDebug(true); return; }
-  S.psetIndex = null;
   if (S.groups.size) await colorModel();   // visa resultatet direkt
+}
+
+// ---------- Penselläge ----------
+async function toggleBrush() {
+  if (S.brush.on) return stopBrush();
+  if (!S.pick) return;
+  if (!setupComplete()) { openSetup(true); log(t("needSetup"), "e"); return; }
+  await loadPsetIndex(false);
+  // Det som redan är markerat när penseln slås på räknas inte som "penseldrag"
+  const sel = await S.api.viewer.getSelection();
+  S.brush = { on: true, timer: null, sig: selSignature(sel), done: new Set(), count: 0, busy: false };
+  S.brush.timer = setInterval(() => brushTick(), 700);   // fungerar även om viewern inte skickar markeringshändelser
+  log(`Penselläge på: ${S.pick}`);
+  renderWriteButton();
+}
+function stopBrush() {
+  clearInterval(S.brush.timer);
+  log(`Penselläge av: ${S.brush.count} element sparade.`);
+  S.brush = { on: false, timer: null, sig: "", done: new Set(), count: 0, busy: false };
+  renderWriteButton();
+}
+const selSignature = (sel) => (sel || []).map((m) => m.modelId + ":" + (m.objectRuntimeIds || []).join(",")).join("|");
+
+async function brushTick(selFromEvent) {
+  const B = S.brush;
+  if (!B.on || B.busy) return;
+  B.busy = true;
+  try {
+    const sel = selFromEvent || await S.api.viewer.getSelection();
+    const sig = selSignature(sel);
+    if (sig === B.sig) return;
+    B.sig = sig;
+    const fresh = [];
+    for (const m of sel || []) {
+      const rids = (m.objectRuntimeIds || []).filter((r) => !B.done.has(m.modelId + ":" + r));
+      if (!rids.length) continue;
+      const ext = await toExternalIds(m.modelId, rids);
+      for (const r of rids) if (ext.has(r)) { B.done.add(m.modelId + ":" + r); fresh.push({ modelId: m.modelId, runtimeId: r, forms: idForms(ext.get(r)) }); }
+    }
+    if (!fresh.length) return;
+    // Färga direkt så att man ser att klicket tog
+    const byModel = new Map();
+    for (const o of fresh) { if (!byModel.has(o.modelId)) byModel.set(o.modelId, []); byModel.get(o.modelId).push(o.runtimeId); }
+    const color = colorFor(S.pick);
+    if (color) await S.api.viewer.setObjectState(selectorFor(byModel), { color });
+    const { ok } = await writeObjects(fresh);
+    if (S.brush === B) { B.count += ok; renderWriteButton(); }
+    moveInGroups(fresh, S.pick);
+  } catch (e) { log(`Penselfel: ${e.message}`, "e"); }
+  finally { B.busy = false; }
+}
+/** Uppdatera översiktens räknare lokalt efter penseldrag. */
+function moveInGroups(objs, status) {
+  if (!S.groups.size || !$("live").checked) return;
+  for (const o of objs) {
+    for (const byModel of S.groups.values()) {
+      const ids = byModel.get(o.modelId);
+      if (ids) { const i = ids.indexOf(o.runtimeId); if (i >= 0) ids.splice(i, 1); }
+    }
+    if (!S.groups.has(status)) S.groups.set(status, new Map());
+    const g = S.groups.get(status);
+    if (!g.has(o.modelId)) g.set(o.modelId, []);
+    g.get(o.modelId).push(o.runtimeId);
+  }
+  for (const [k, byModel] of S.groups) if (![...byModel.values()].some((ids) => ids.length)) S.groups.delete(k);
+  renderCards();
+}
+
+// ---------- Automatisk upptäckt ----------
+const PER_PROJECT = new Set(["libId", "defId", "region"]);
+const skey = (k) => (PER_PROJECT.has(k) && S.projectId ? `${S.projectId}.${k}` : k);
+
+/** Connects projektregion → regionkod i API-adresserna. */
+function regionFromProject(p) {
+  const loc = String((p && (p.location || p.region || p.serverRegion)) || "").toLowerCase();
+  if (!loc) return null;
+  if (/eu|europe/.test(loc)) return "eu-west-1";
+  if (/austral|ap-southeast-2/.test(loc)) return "ap-southeast-2";
+  if (/asia|ap-southeast-1|singapore/.test(loc)) return "ap-southeast-1";
+  if (/us|north|america/.test(loc)) return "us-east-1";
+  return null;
+}
+const orgBase = () => psetBase().replace("://pset-api", "://org-api");
+
+/** Kandidater för biblioteks-ID ur en Organizer-länk "frn:lib:<id>". */
+function libIdCandidates(link) {
+  const raw = String(link).replace(/^frn:lib:/, "");
+  let dec = raw; try { dec = decodeURIComponent(raw); } catch { /* lämna */ }
+  return [...new Set([dec, raw, dec.split(":")[0]])].filter(Boolean);
+}
+
+/** Hitta projektets PMJ-bibliotek utan att användaren behöver ange något ID. */
+async function discoverLibrary() {
+  if (!S.projectId) throw new Error("Projekt-ID saknas.");
+  const forest = encodeURIComponent(`project:${S.projectId}:data`);
+  const node = await pset("GET", `${orgBase()}/forests/${forest}/trees/ProjectContext/nodes/PSetLibs?deleted&fields=metadata`);
+  const links = (node && node.links) || [];
+  log(`Projektet har ${links.length} property set-bibliotek.`);
+  const found = [];
+  for (const link of links) {
+    for (const id of libIdCandidates(link)) {
+      let lib;
+      try { lib = await pset("GET", `/libs/${encodeURIComponent(id)}`); } catch { continue; }
+      if (!lib || lib.deleted) break;
+      const defs = await psetAll(`/libs/${encodeURIComponent(id)}/defs`).catch(() => []);
+      const statusDef = defs.find((d) => /rakennusosan\s*status/i.test(d.name || ""));
+      found.push({ id, name: lib.name || id, modified: Date.parse(lib.modifiedAt || lib.updatedAt || lib.createdAt || 0) || 0, statusDef });
+      break;
+    }
+  }
+  const usable = found.filter((f) => f.statusDef)
+    .sort((a, b) => (/pmj/i.test(b.name) - /pmj/i.test(a.name)) || (b.modified - a.modified));
+  if (!usable.length) { log(`Hittade inget bibliotek med "Rakennusosan Status" (${found.map((f) => f.name).join(", ") || "inga"}).`, "e"); return false; }
+  const pick = usable[0];
+  log(`✔ Valde bibliotek "${pick.name}"${usable.length > 1 ? ` (av ${usable.length} med Rakennusosan Status, senast ändrade)` : ""}.`);
+  $("libId").value = pick.id;
+  store.set("defId", pick.statusDef.id || pick.statusDef.defId);
+  return true;
+}
+
+/** Räkna ut länkmallen genom att matcha modellens GUID mot befintliga property set-länkar. */
+async function autoLinkTemplate() {
+  const index = await loadPsetIndex(true);
+  if (!index.size) { log("Inga element har Rakennusosan Status ännu – länkformatet hittas automatiskt när första värdet finns, eller via ⚙.", "e"); return false; }
+  const byGuid = new Map(), byUuid = new Map();
+  for (const m of (await S.api.viewer.getObjects()) || []) {
+    const rids = (m.objects || []).map((o) => o.id);
+    const ext = await toExternalIds(m.modelId, rids);
+    for (const e of ext.values()) { const f = idForms(e); byGuid.set(f.guid, m.modelId); byUuid.set(f.uuid.toLowerCase(), m.modelId); }
+  }
+  let n = 0;
+  for (const link of index.keys()) {
+    if (++n > 5000) break;
+    for (const piece of link.split(/[:/|#?&=,;]+/)) {
+      let tpl = null, modelId = null;
+      if (byGuid.has(piece)) { tpl = link.replace(piece, "{guid}"); modelId = byGuid.get(piece); }
+      else if (byUuid.has(piece.toLowerCase())) { tpl = link.replace(piece, "{uuid}"); modelId = byUuid.get(piece.toLowerCase()); }
+      if (!tpl) continue;
+      if (modelId && tpl.includes(modelId)) tpl = tpl.replace(modelId, "{modelId}");
+      $("linkTpl").value = tpl; store.set("linkTpl", tpl);
+      log(`✔ Länkformat hittat automatiskt: ${tpl}`);
+      return true;
+    }
+  }
+  log("Hittade inga av de laddade modellernas element bland property set-länkarna. Är rätt modell öppen?", "e");
+  return false;
+}
+
+/** Körs när token finns: hitta allt som går automatiskt, öppna ⚙ bara om något saknas. */
+async function autoSetup() {
+  try {
+    if (!$("libId").value.trim()) await discoverLibrary();
+  } catch (e) { log(`Automatisk sökning av bibliotek misslyckades: ${e.message}`, "e"); }
+  if ($("libId").value.trim() && !S.def) await guard(loadLibrary)();
+  if (S.def && !$("linkTpl").value.trim()) { try { await autoLinkTemplate(); } catch (e) { log(`Länkformat: ${e.message}`, "e"); } }
+  if (!setupComplete()) openSetup(true);
 }
 
 // ---------- UI-skal ----------
@@ -439,14 +662,12 @@ function onEvent(event, data) {
   }
   if (event === "viewer.onSelectionChanged") {
     setSelCount(Array.isArray(data) ? data.reduce((a, m) => a + ((m.objectRuntimeIds || []).length), 0) : 0);
+    if (S.brush.on && Array.isArray(data)) brushTick(data);
     return;
   }
   log(`händelse: ${event}`);
 }
-async function afterToken() {
-  if (!S.def && $("libId").value.trim()) await guard(loadLibrary)();
-  if (!setupComplete()) openSetup(true);
-}
+async function afterToken() { await autoSetup(); }
 async function requestToken() {
   const r = await S.api.extension.requestPermission("accesstoken");
   if (r && r !== "pending" && r !== "denied") { const first = !S.token; S.token = r; if (first) await afterToken(); }
@@ -464,7 +685,7 @@ function guard(fn) {
 
 async function init() {
   LANG = store.get("lang") || "sv";
-  for (const k of ["region", "libId", "linkTpl"]) { const v = store.get(k); if (v) $(k).value = v; }
+  { const v = store.get("linkTpl"); if (v) $("linkTpl").value = v; }
   $("btnLang").onclick = () => { LANG = LANG === "sv" ? "fi" : "sv"; store.set("lang", LANG); applyLang(); };
   $("btnSetup").onclick = () => openSetup($("setup").hidden);
   $("btnSetupDone").onclick = () => openSetup(false);
@@ -473,10 +694,13 @@ async function init() {
   $("tabFill").onclick = () => showTab(true);
   $("btnLib").onclick = guard(loadLibrary);
   $("defId").onchange = guard(loadDefinition);
-  $("statusKey").onchange = () => { store.set("statusKey", $("statusKey").value); S.pick = ""; renderStatusGrid(); };
-  $("dateKey").onchange = () => { store.set("dateKey", $("dateKey").value); renderWriteButton(); };
+  $("statusKey").onchange = () => { store.set("statusKey", $("statusKey").value); S.pick = ""; if (S.brush.on) stopBrush(); renderStatusGrid(); };
+  $("dateKey").onchange = () => { store.set("dateKey", $("dateKey").value); renderAutoHint(); renderWriteButton(); };
+  $("autoDates").checked = store.get("autoDates") !== "0";
+  $("autoDates").onchange = () => { store.set("autoDates", $("autoDates").checked ? "1" : "0"); renderAutoHint(); };
+  $("btnBrush").onclick = guard(toggleBrush);
   $("dateVal").oninput = renderWriteButton;
-  $("live").onchange = renderWriteButton;
+  $("live").onchange = () => { if (S.brush.on) stopBrush(); renderWriteButton(); };
   $("linkTpl").onchange = () => store.set("linkTpl", $("linkTpl").value.trim());
   $("region").onchange = () => store.set("region", $("region").value);
   $("btnDiscover").onclick = guard(discoverLink);
@@ -501,9 +725,16 @@ async function init() {
   try {
     S.api = await TrimbleConnectWorkspace.connect(window.parent, onEvent, 30000);
     S.connected = true; setDot();
-    try { const p = await S.api.project.getProject(); log(`Projekt: ${p && p.name} (${p && p.id})`); } catch { /* valfritt */ }
-    await requestToken();
-    if (!S.token) openSetup(!setupComplete());
+    try {
+      const p = await S.api.project.getProject();
+      S.projectId = p && p.id;
+      log({ projekt: p });
+      const region = regionFromProject(p);
+      if (region) $("region").value = `https://pset-api.${region}.connect.trimble.com/v1`;
+    } catch (e) { log(`Kunde inte läsa projektet: ${e.message}`, "e"); }
+    { const v = store.get("region"); if (v && !S.projectId) $("region").value = v; }
+    { const v = store.get("libId"); if (v) $("libId").value = v; }
+    await requestToken();   // när token finns körs autoSetup()
   } catch (e) {
     setDot();
     log(`Kunde inte ansluta till Connect: ${e.message}. Körs sidan inuti Connects 3D-visare?`, "e");

@@ -1,4 +1,4 @@
-# PMJ 4D – v0.2
+# PMJ 4D – v0.4
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -36,14 +36,24 @@ Själva 4D-tidslinjen ingår inte än. Den bygger vi när de här tre fungerar.
 
 Panelen har två flikar och en kugghjulsknapp (⚙). FI/SV-knappen växlar språk.
 
-**Första gången (⚙ Inställningar)** öppnas inställningarna automatiskt.
-1. Klistra in bibliotekets ID och klicka *Ladda*. ID:t hittar du i adressfältet när du öppnar *PMJ master library V2.0* i Property Set Manager. *Rakennusosan Status* och *Kokoonpanon Status* väljs då automatiskt.
-2. Sätt status för hand på **ett** objekt i Connect, markera det och klicka *Hitta från markerat objekt*. Appen räknar ut hur Connect kopplar property sets till objekt.
-3. Klicka *Klar*. Inställningarna sparas i webbläsaren.
+**Ingen inställning behövs normalt.** När panelen öppnas gör appen följande:
+1. Den läser projekt och region från Connect.
+2. Den hämtar projektets property set-bibliotek från Trimbles Organizer-tjänst och väljer det bibliotek som innehåller *Rakennusosan Status*. Om flera gör det väljs det senast ändrade, till exempel *PMJ master library V2.0*.
+3. Den räknar ut länkformatet genom att jämföra modellens element med de element som redan har ett värde.
+
+Allt sparas per projekt i webbläsaren. ⚙ öppnas bara om något inte kunde hittas. Det händer främst i ett helt nytt projekt där inget element har status ännu. Sätt då status för hand på ett element i Connect och klicka *Hitta från markerat objekt*. Länkformatet gäller sedan för alla projekt.
 
 **Översikt:** *Uppdatera* färgar modellen efter status och visar antal per status. Klicka på ett statuskort för att dölja eller visa just de objekten.
 
 **Fyll i:** Markera objekt i 3D, klicka på en status och lägg eventuellt till ett datum. Utan bocken *Spara på riktigt* blir det en provkörning, och anropen visas under *Felsökning*. Med bocken sparas värdena och modellen färgas om. Testa gärna på en kopia av projektet först.
+
+**Automatiska datum** (kan stängas av) fyller bara i datum där fältet är tomt. Ett datum som redan finns skrivs aldrig över.
+- PIIRUSTUS OK → *Piirustukset Lähetetty* = idag
+- VALMISTETTU → *Valmistuspäivämäärä* = idag
+- ASENNETTU → *Asennuspäivämäärä* = idag
+- När du anger *Suunniteltu Asennuspäivä* räknas *Suunniteltu Asennusviikko* ut automatiskt (ISO-vecka).
+
+**Penselläge:** Välj en status och klicka på 🖌. Därefter sparas statusen på varje element du klickar på i 3D, och elementet färgas direkt. Klicka på knappen igen för att stänga penselläget. Ett element som redan har penslats skrivs inte igen under samma penseldrag.
 
 Om något går fel: öppna *Felsökning*, klicka *Kopiera logg* och klistra in loggen till Claude.
 
