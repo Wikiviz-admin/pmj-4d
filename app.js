@@ -1,4 +1,4 @@
-/* PMJ 4D – v0.7
+/* PMJ 4D – v0.8
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -135,7 +135,37 @@ function idForms(externalId) {
   const g = uuidToIfc(id);
   return g ? { guid: g, uuid: ifcToUuid(g) } : { guid: id, uuid: id };
 }
-const buildLink = (tpl, f, modelId) => tpl.replaceAll("{guid}", f.guid).replaceAll("{uuid}", f.uuid).replaceAll("{modelId}", modelId);
+S.fileIds = new Map();   // viewerns modelId (= versionId) -> filens id (oförändrat mellan versioner)
+const buildLink = (tpl, f, modelId) => tpl.replaceAll("{guid}", f.guid).replaceAll("{uuid}", f.uuid)
+  .replaceAll("{fileId}", S.fileIds.get(modelId) || modelId).replaceAll("{modelId}", modelId);
+
+/** Hämta fil-ID för laddade modeller. */
+async function loadFileIds() {
+  try {
+    for (const m of (await S.api.viewer.getModels("loaded")) || []) {
+      if (m.versionId) S.fileIds.set(m.versionId, m.id);
+      if (m.id) S.fileIds.set(m.id, m.id);
+    }
+  } catch (e) { log(`Kunde inte läsa modellistan: ${e.message}`, "e"); }
+}
+/** Byt ut ett inbakat fil-/versions-ID i länkmallen mot en platshållare. */
+function generalizeTemplate(tpl, modelId) {
+  const fileId = S.fileIds.get(modelId);
+  if (fileId && tpl.includes(fileId)) return tpl.split(fileId).join("{fileId}");
+  if (modelId && tpl.includes(modelId)) return tpl.split(modelId).join("{modelId}");
+  for (const [ver, id] of S.fileIds) {                    // mall från en annan modell/version
+    if (tpl.includes(id)) return tpl.split(id).join("{fileId}");
+    if (tpl.includes(ver)) return tpl.split(ver).join("{modelId}");
+  }
+  return tpl;
+}
+/** Uppgradera en sparad mall som fortfarande har ett fast ID. */
+function upgradeTemplate() {
+  const tpl = $("linkTpl").value.trim();
+  if (!tpl || /\{(fileId|modelId)\}/.test(tpl)) return;
+  const g = generalizeTemplate(tpl, null);
+  if (g !== tpl) { $("linkTpl").value = g; store.set("linkTpl", g); log(`Länkmallen gjordes modelloberoende: ${g}`); }
+}
 
 // ---------- PSet API ----------
 const psetBase = () => $("region").value.replace(/\/$/, "");
@@ -376,7 +406,8 @@ async function discoverLink() {
       else if (link.toLowerCase().includes(uuid.toLowerCase())) tpl = link.replace(new RegExp(uuid, "i"), "{uuid}");
       else if (link.toLowerCase().includes(uuid.replace(/-/g, "").toLowerCase())) { log("Länken använder UUID utan bindestreck – behöver stöd i koden.", "e"); continue; }
       if (!tpl) continue;
-      if (tpl.includes(o.modelId)) tpl = tpl.replace(o.modelId, "{modelId}");
+      await loadFileIds();
+      tpl = generalizeTemplate(tpl, o.modelId);
       $("linkTpl").value = tpl; store.set("linkTpl", tpl);
       log(`✔ Länkformat: ${tpl}  (objekt ${guid}, länk ${link})`);
       if (/[0-9a-f]{20,}/i.test(tpl.replace(/\{\w+\}/g, ""))) log("Obs: mallen innehåller ett långt ID (fil/projekt?). Kontrollera att det inte ändras mellan modellversioner.", "e");
@@ -461,20 +492,43 @@ function claimedKids(byModel) {
 const addTo = (map, modelId, rid) => { if (!map.has(modelId)) map.set(modelId, []); map.get(modelId).push(rid); };
 
 // ---------- Översikt ----------
+/** Statusfältets standardvärde i biblioteket (t.ex. ODOTTAA), om ett sådant finns. */
+function statusDefault() {
+  const p = S.props[$("statusKey").value] || {};
+  const d = p.default ?? p.defaultValue ?? (p.defaults && p.defaults[0]);
+  return d != null && d !== "" ? String(d) : null;
+}
+/** Logga hur väl länkmallen passar de sparade värdena – avslöjar fel mall direkt. */
+function diagnoseLinks(index, tpl, matched, defaulted, def) {
+  const esc = tpl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\{(guid|uuid|fileId|modelId)\\\}/g, ".+?");
+  const re = new RegExp("^" + esc + "$");
+  const links = [...index.keys()];
+  const misfit = links.filter((l) => !re.test(l));
+  log(`Länkkontroll: ${index.size} sparade värden, ${matched} hittade i öppna modeller, ${misfit.length} passar inte mallen ${tpl}` +
+    (def ? `; ${defaulted} objekt utan sparat värde räknas som ${def}.` : "; inget standardvärde i biblioteket."));
+  if (misfit.length) log({ exempel_som_inte_passar: misfit.slice(0, 5) }, "e");
+  if (index.size && !matched) log("Inga sparade värden hittades i de öppna modellerna – länkmallen stämmer troligen inte. Öppna ⚙ och klicka 'Hitta från markerat objekt' på ett element med sparad status.", "e");
+}
+
 async function colorModel() {
   if (S.tl) S.tl.painted = false;
-  const tpl = $("linkTpl").value.trim(), key = $("statusKey").value;
+  let tpl = $("linkTpl").value.trim();
+  const key = $("statusKey").value;
   if (!tpl || !key) { openSetup(true); log(t("needSetup"), "e"); return; }
+  await loadFileIds(); upgradeTemplate(); tpl = $("linkTpl").value.trim();
   const index = await loadPsetIndex(true);
   const models = await S.api.viewer.getObjects();
   const tracked = new Map(), rest = new Map();   // element med status / övriga objekt
+  const def = statusDefault();
+  let matched = 0, defaulted = 0;
   S.groups = new Map();
   for (const m of models || []) {
     const rids = (m.objects || []).map((o) => o.id);
     const ext = await toExternalIds(m.modelId, rids);
     for (const rid of rids) {
       const props = ext.has(rid) ? index.get(buildLink(tpl, idForms(ext.get(rid)), m.modelId)) : null;
-      const v = props && props[key] ? String(props[key]) : NONE;
+      if (props) matched++;
+      let v = props && props[key] ? String(props[key]) : NONE;
       if (v === NONE) { addTo(rest, m.modelId, rid); continue; }
       addTo(tracked, m.modelId, rid);
       if (!S.groups.has(v)) S.groups.set(v, new Map());
@@ -488,9 +542,12 @@ async function colorModel() {
   for (const [modelId, ids] of rest) for (const rid of ids) {
     if (claimed.has(modelId + ":" + rid)) continue;          // del av ett element med status
     if (parents.has(modelId + ":" + rid)) { skipped++; continue; }   // våning/byggnad o.d. – får aldrig döljas
-    if (!S.groups.has(NONE)) S.groups.set(NONE, new Map());
-    addTo(S.groups.get(NONE), modelId, rid);
+    const v = def || NONE;                                    // inget sparat värde → bibliotekets standardvärde (som i Connect)
+    if (def) defaulted++;
+    if (!S.groups.has(v)) S.groups.set(v, new Map());
+    addTo(S.groups.get(v), modelId, rid);
   }
+  diagnoseLinks(index, tpl, matched, defaulted, def);
   log(`Översikt: ${skipped} överordnade objekt (byggnad, våningar o.d.) lämnas orörda; ${claimed.size} delar följer sina element.`);
   await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
   for (const [v, byModel] of S.groups) {
@@ -610,6 +667,7 @@ function propsFor(existing) {
 async function writeObjects(objs) {
   const libId = $("libId").value.trim(), defId = $("defId").value, tpl = $("linkTpl").value.trim();
   const live = $("live").checked;
+  if (!S.fileIds.size) await loadFileIds();
   const index = await loadPsetIndex(false);       // behövs för att se vilka datum som redan finns
   let ok = 0, fail = 0;
   const queue = objs.slice();
@@ -733,6 +791,7 @@ const fmtDM = (ms) => { const d = new Date(ms); return `${d.getUTCDate()}.${d.ge
 /** Läs in alla element med deras datum och bygg veckorna. */
 async function buildTimeline() {
   if (!setupComplete()) { openSetup(true); throw new Error(t("needSetup")); }
+  await loadFileIds(); upgradeTemplate();
   const tpl = $("linkTpl").value.trim(), F = S.fields;
   const index = await loadPsetIndex(true);
   const elements = [], untracked = new Map();
@@ -990,7 +1049,8 @@ async function autoLinkTemplate() {
       if (byGuid.has(piece)) { tpl = link.replace(piece, "{guid}"); modelId = byGuid.get(piece); }
       else if (byUuid.has(piece.toLowerCase())) { tpl = link.replace(piece, "{uuid}"); modelId = byUuid.get(piece.toLowerCase()); }
       if (!tpl) continue;
-      if (modelId && tpl.includes(modelId)) tpl = tpl.replace(modelId, "{modelId}");
+      await loadFileIds();
+      tpl = generalizeTemplate(tpl, modelId);
       $("linkTpl").value = tpl; store.set("linkTpl", tpl);
       log(`✔ Länkformat hittat automatiskt: ${tpl}`);
       return true;
