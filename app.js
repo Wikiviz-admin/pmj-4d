@@ -1,4 +1,4 @@
-/* PMJ 4D – v0.8
+/* PMJ 4D – v0.9
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -379,6 +379,31 @@ async function selectedObjects() {
   }
   return out;
 }
+/** Markerade objekt → deras element (cast unit). Status sparas alltid på elementnivå. */
+async function toElements(list /* [{modelId, runtimeIds}] */) {
+  const models = [];
+  for (const m of list) {
+    if (!S.structDone.has(m.modelId)) {
+      const all = ((await S.api.viewer.getObjects()) || []).find((x) => x.modelId === m.modelId);
+      models.push({ modelId: m.modelId, rids: all ? (all.objects || []).map((o) => o.id) : m.runtimeIds });
+    }
+  }
+  if (models.length) await loadStructure(models);
+  const out = [];
+  for (const m of list) {
+    const els = [...new Set(m.runtimeIds.map((r) => topElement(m.modelId, r)).filter((r) => !S.containers.has(K(m.modelId, r))))];
+    const ext = await toExternalIds(m.modelId, els);
+    for (const r of els) if (ext.has(r)) out.push({ modelId: m.modelId, runtimeId: r, forms: idForms(ext.get(r)) });
+  }
+  return out;
+}
+async function selectedElements() {
+  const sel = await readSelection();
+  const els = await toElements(sel);
+  const n = sel.reduce((a, m) => a + m.runtimeIds.length, 0);
+  if (els.length !== n) log(`${n} markerade objekt → ${els.length} element.`);
+  return els;
+}
 const selectorFor = (byModel) => ({ modelObjectIds: [...byModel].map(([modelId, ids]) => ({ modelId, objectRuntimeIds: ids })) });
 
 // ---------- Länkformat ----------
@@ -426,72 +451,100 @@ async function showProps() {
   log({ modelId: m.modelId, runtimeId: rid, externalId: ext.get(rid), egenskaper: props });
 }
 
-// ---------- Elementhierarki (Tekla cast unit / IFC-assembly → delar) ----------
-// PMJ-statusen sitter på elementet, men geometrin ligger i dess delar. Delarna ska därför
-// följa elementets färg och synlighet, och inte räknas som "utan status".
-const ELEMENT_ASSEMBLY = 4;   // HierarchyType.ElementAssembly
-S.kids = new Map();           // "modelId:rid" -> [delarnas runtime-id]
-
-async function loadKids(byModel) {
-  for (const [modelId, ids] of byModel) {
-    const missing = ids.filter((r) => !S.kids.has(modelId + ":" + r));
-    if (!missing.length) continue;
-    // Snabbtest: har de här objekten över huvud taget några delar?
-    let probe = [];
-    try { probe = await S.api.viewer.getHierarchyChildren(modelId, missing.slice(0, 2000), ELEMENT_ASSEMBLY, true); }
-    catch (e) { log(`Hierarki kunde inte läsas (${e.message}) – delar följer inte sina element.`, "e"); }
-    if (!probe || !probe.length) { missing.forEach((r) => S.kids.set(modelId + ":" + r, [])); continue; }
-    log(`Läser elementens delar (${missing.length} element)…`);
-    const queue = missing.slice();
-    async function worker() {
-      while (queue.length) {
-        const r = queue.shift();
-        try {
-          const ch = await S.api.viewer.getHierarchyChildren(modelId, [r], ELEMENT_ASSEMBLY, true);
-          S.kids.set(modelId + ":" + r, (ch || []).map((c) => c.id).filter((id) => id !== r));
-        } catch { S.kids.set(modelId + ":" + r, []); }
-      }
-    }
-    await Promise.all(Array.from({ length: 8 }, worker));
-  }
-}
-/** Överordnade objekt (projekt, byggnad, våning, assembly …) till element med status.
- *  Döljs de, döljer Connect allt under dem – därför lämnas de alltid orörda. */
-const PARENT_TYPES = [1, 2, 3, 4, 5];   // SpatialHierarchy, SpatialContainment, Containment, ElementAssembly, Group
-async function loadAncestors(byModel) {
-  const set = new Set();
-  for (const [modelId, ids] of byModel) {
-    for (const type of PARENT_TYPES) {
-      for (let i = 0; i < ids.length; i += 5000) {
-        try {
-          const parents = await S.api.viewer.getHierarchyParents(modelId, ids.slice(i, i + 5000), type, true, false);
-          for (const p of parents || []) set.add(modelId + ":" + p.id);
-        } catch { /* hierarkityp saknas i modellen */ }
-      }
-    }
-  }
-  return set;
-}
-
-/** Lägg till delarna till en {modelId -> ids}-karta (för färg och synlighet). */
-function withKids(byModel) {
-  const out = new Map();
-  for (const [modelId, ids] of byModel) {
-    const all = ids.slice();
-    for (const r of ids) { const k = S.kids.get(modelId + ":" + r); if (k && k.length) all.push(...k); }
-    out.set(modelId, all);
-  }
-  return out;
-}
-/** Alla delar som tillhör något av elementen (så att de inte räknas som "utan status"). */
-function claimedKids(byModel) {
-  const set = new Set();
-  for (const [modelId, ids] of byModel) for (const r of ids) for (const k of S.kids.get(modelId + ":" + r) || []) set.add(modelId + ":" + k);
-  return set;
-}
+// ---------- Modellstruktur: behållare → element (cast unit) → delar ----------
+// Connect döljer allt under ett dolt objekt. Därför styrs färg och synlighet ALLTID på
+// "löv" (objekt utan barn = det man ser), aldrig på element, våningar eller andra behållare.
+const ELEMENT_ASSEMBLY = 4;                       // HierarchyType.ElementAssembly
+const CONTAINER_TYPES = [1, 2, 3, 5, 6, 7];       // spatial hierarki/innehåll, grupper, system, zoner
+S.kids = new Map();        // "m:element" -> [alla underliggande objekt]
+S.partOf = new Map();      // "m:del" -> närmaste element-rid
+S.asm = new Set();         // "m:id" för element/assemblies (har delar)
+S.containers = new Set();  // "m:id" för behållare (våning, byggnad …)
+S.structDone = new Set();  // modelId som är inlästa
+const K = (m, r) => m + ":" + r;
 const addTo = (map, modelId, rid) => { if (!map.has(modelId)) map.set(modelId, []); map.get(modelId).push(rid); };
 
-// ---------- Översikt ----------
+async function hierParents(modelId, ids, type) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += 5000) {
+    try { out.push(...((await S.api.viewer.getHierarchyParents(modelId, ids.slice(i, i + 5000), type, false, false)) || [])); }
+    catch { /* typen finns inte i modellen */ }
+  }
+  return out.map((p) => p.id);
+}
+/** Läs delarna under ett antal element (parallellt). Provar assembly-hierarkin först. */
+async function loadChildren(modelId, elementIds) {
+  const queue = elementIds.filter((r) => !S.kids.has(K(modelId, r)));
+  if (!queue.length) return;
+  async function worker() {
+    while (queue.length) {
+      const r = queue.shift();
+      let ch = [];
+      for (const type of [ELEMENT_ASSEMBLY, 1, 3]) {
+        try { ch = ((await S.api.viewer.getHierarchyChildren(modelId, [r], type, true)) || []).map((c) => c.id).filter((id) => id !== r); }
+        catch { ch = []; }
+        if (ch.length) break;
+      }
+      S.kids.set(K(modelId, r), ch);
+      if (ch.length) S.asm.add(K(modelId, r));
+    }
+  }
+  await Promise.all(Array.from({ length: 8 }, worker));
+}
+function rebuildPartOf() {
+  S.partOf = new Map();
+  // Minsta element vinner (= närmaste förälder vid nästlade assemblies)
+  const list = [...S.kids].filter(([, ch]) => ch.length).sort((a, b) => b[1].length - a[1].length);
+  for (const [key, ch] of list) {
+    const [m, r] = [key.slice(0, key.lastIndexOf(":")), Number(key.slice(key.lastIndexOf(":") + 1))];
+    for (const c of ch) S.partOf.set(K(m, c), r);
+  }
+}
+/** Läs in struktur för modellerna en gång. statusKeys = objekt som har ett sparat värde. */
+async function loadStructure(models, statusKeys) {
+  let changed = false;
+  for (const { modelId, rids } of models) {
+    if (!S.structDone.has(modelId)) {
+      const asm = new Set(await hierParents(modelId, rids, ELEMENT_ASSEMBLY));
+      for (const type of CONTAINER_TYPES) for (const id of await hierParents(modelId, rids, type)) if (!asm.has(id)) S.containers.add(K(modelId, id));
+      if (asm.size) log(`Läser in ${asm.size} elements delar…`);
+      await loadChildren(modelId, [...asm]);
+      S.structDone.add(modelId); changed = true;
+    }
+    // Reserv: om viewern inte svarar på "förälder", fråga objekten med sparad status efter delar
+    if (statusKeys && !S.probed) S.probed = new Set();
+    if (statusKeys && !S.probed.has(modelId)) {
+      S.probed.add(modelId);
+      const cand = rids.filter((r) => statusKeys.has(K(modelId, r)) && !S.kids.has(K(modelId, r)) && !S.containers.has(K(modelId, r)) && !S.partOf.has(K(modelId, r)));
+      let probe = [];
+      if (cand.length) { try { probe = (await S.api.viewer.getHierarchyChildren(modelId, cand.slice(0, 2000), ELEMENT_ASSEMBLY, true)) || []; } catch { probe = []; } }
+      if (probe.length) { await loadChildren(modelId, cand); changed = true; }
+    }
+    // Behållare som ändå har en sparad status (status satt på fel nivå) behandlas som element
+    const odd = rids.filter((r) => statusKeys && statusKeys.has(K(modelId, r)) && S.containers.has(K(modelId, r)) && !S.kids.has(K(modelId, r)));
+    if (odd.length) { await loadChildren(modelId, odd); odd.forEach((r) => S.containers.delete(K(modelId, r))); changed = true; }
+  }
+  if (changed) rebuildPartOf();
+}
+const isLeaf = (m, r) => !S.asm.has(K(m, r)) && !S.containers.has(K(m, r));
+/** Översta elementet ett objekt hör till (eller objektet självt). */
+function topElement(m, r) {
+  let cur = r, guard = 0;
+  while (S.partOf.has(K(m, cur)) && guard++ < 20) cur = S.partOf.get(K(m, cur));
+  return cur;
+}
+/** Synliga löv under ett element (eller objektet självt om det saknar delar). */
+function leavesOf(m, r) {
+  const ch = S.kids.get(K(m, r));
+  if (!ch || !ch.length) return S.containers.has(K(m, r)) ? [] : [r];
+  return ch.filter((c) => isLeaf(m, c));
+}
+function leavesMap(byModel) {
+  const out = new Map();
+  for (const [m, ids] of byModel) { const all = []; for (const r of ids) all.push(...leavesOf(m, r)); out.set(m, all); }
+  return out;
+}
+
 /** Statusfältets standardvärde i biblioteket (t.ex. ODOTTAA), om ett sådant finns. */
 function statusDefault() {
   const p = S.props[$("statusKey").value] || {};
@@ -517,55 +570,65 @@ async function colorModel() {
   if (!tpl || !key) { openSetup(true); log(t("needSetup"), "e"); return; }
   await loadFileIds(); upgradeTemplate(); tpl = $("linkTpl").value.trim();
   const index = await loadPsetIndex(true);
-  const models = await S.api.viewer.getObjects();
-  const tracked = new Map(), rest = new Map();   // element med status / övriga objekt
-  const def = statusDefault();
-  let matched = 0, defaulted = 0;
-  S.groups = new Map();
-  for (const m of models || []) {
-    const rids = (m.objects || []).map((o) => o.id);
-    const ext = await toExternalIds(m.modelId, rids);
-    for (const rid of rids) {
-      const props = ext.has(rid) ? index.get(buildLink(tpl, idForms(ext.get(rid)), m.modelId)) : null;
+  const models = ((await S.api.viewer.getObjects()) || []).map((m) => ({ modelId: m.modelId, rids: (m.objects || []).map((o) => o.id) }));
+  // 1) Sparade värden per objekt
+  const saved = new Map();
+  let matched = 0;
+  for (const { modelId, rids } of models) {
+    const ext = await toExternalIds(modelId, rids);
+    for (const r of rids) {
+      const props = ext.has(r) ? index.get(buildLink(tpl, idForms(ext.get(r)), modelId)) : null;
       if (props) matched++;
-      let v = props && props[key] ? String(props[key]) : NONE;
-      if (v === NONE) { addTo(rest, m.modelId, rid); continue; }
-      addTo(tracked, m.modelId, rid);
-      if (!S.groups.has(v)) S.groups.set(v, new Map());
-      addTo(S.groups.get(v), m.modelId, rid);
+      if (props && props[key]) saved.set(K(modelId, r), String(props[key]));
     }
   }
-  await loadKids(tracked);
-  const claimed = claimedKids(tracked);
-  const parents = await loadAncestors(tracked);
-  let skipped = 0;
-  for (const [modelId, ids] of rest) for (const rid of ids) {
-    if (claimed.has(modelId + ":" + rid)) continue;          // del av ett element med status
-    if (parents.has(modelId + ":" + rid)) { skipped++; continue; }   // våning/byggnad o.d. – får aldrig döljas
-    const v = def || NONE;                                    // inget sparat värde → bibliotekets standardvärde (som i Connect)
-    if (def) defaulted++;
-    if (!S.groups.has(v)) S.groups.set(v, new Map());
-    addTo(S.groups.get(v), modelId, rid);
+  // 2) Struktur: element, delar, behållare
+  await loadStructure(models, new Set(saved.keys()));
+  // 3) Varje synligt löv får sin egen status, annars närmaste överordnade elements, annars standardvärdet.
+  //    "Ägaren" är objektet som bestämmer statusen – det är dem vi räknar.
+  const def = statusDefault();
+  S.groups = new Map(); S.leafGroups = new Map(); S.leafInfo = new Map();
+  let defaulted = 0, mixed = 0;
+  const owned = new Map();   // status -> Set("m:ägare")
+  for (const { modelId, rids } of models) for (const r of rids) {
+    if (!isLeaf(modelId, r)) continue;
+    let cur = r, owner = null, v = null, guard = 0;
+    while (cur != null && guard++ < 20) {
+      const sv = saved.get(K(modelId, cur));
+      if (sv) { owner = cur; v = sv; break; }
+      cur = S.partOf.has(K(modelId, cur)) ? S.partOf.get(K(modelId, cur)) : null;
+    }
+    if (!v) { owner = topElement(modelId, r); v = def || NONE; if (def) defaulted++; }
+    const top = topElement(modelId, r);
+    if (owner !== top && saved.has(K(modelId, top)) && saved.get(K(modelId, top)) !== v) mixed++;
+    S.leafInfo.set(K(modelId, r), { owner, status: v });
+    if (!S.leafGroups.has(v)) S.leafGroups.set(v, new Map());
+    addTo(S.leafGroups.get(v), modelId, r);
+    if (!owned.has(v)) owned.set(v, new Set());
+    const ok = K(modelId, owner);
+    if (!owned.get(v).has(ok)) { owned.get(v).add(ok); if (!S.groups.has(v)) S.groups.set(v, new Map()); addTo(S.groups.get(v), modelId, owner); }
   }
   diagnoseLinks(index, tpl, matched, defaulted, def);
-  log(`Översikt: ${skipped} överordnade objekt (byggnad, våningar o.d.) lämnas orörda; ${claimed.size} delar följer sina element.`);
+  log(`Struktur: ${S.asm.size} element med delar, ${S.containers.size} behållare (byggnad/våningar) lämnas orörda.`);
+  if (mixed) log(`Obs: ${mixed} delar har en annan sparad status än sitt element (status sparad på delnivå). De visas med delens egen status. Ny sparning från appen sker alltid på elementet.`, "e");
+  // 4) Färg och synlighet – bara på löv
   await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
-  for (const [v, byModel] of S.groups) {
+  for (const [v, byModel] of S.leafGroups) {
     const color = colorFor(v);
     const state = {};
     if (color) state.color = color;
     if (S.hidden.has(v)) state.visible = false;
-    if (Object.keys(state).length) await S.api.viewer.setObjectState(selectorFor(withKids(byModel)), state);
+    if (Object.keys(state).length) await S.api.viewer.setObjectState(selectorFor(byModel), state);
   }
   renderCards();
 }
 
 async function toggleStatus(v) {
-  const byModel = S.groups.get(v);
-  if (!byModel) return;
+  const leaves = S.leafGroups && S.leafGroups.get(v);
+  if (!leaves) return;
   const hide = !S.hidden.has(v);
   hide ? S.hidden.add(v) : S.hidden.delete(v);
-  await S.api.viewer.setObjectState(selectorFor(withKids(byModel)), { visible: !hide });
+  await S.api.viewer.setObjectState(selectorFor(leaves), { visible: !hide });
   renderCards();
 }
 
@@ -693,9 +756,9 @@ async function writeObjects(objs) {
 
 async function writeSelected() {
   if (!setupComplete()) { openSetup(true); log(t("needSetup"), "e"); return; }
-  const objs = await selectedObjects();
+  const objs = await selectedElements();
   if (!objs.length) return;
-  log(`${$("live").checked ? "SPARAR" : "PROVKÖRNING"} på ${objs.length} objekt.`);
+  log(`${$("live").checked ? "SPARAR" : "PROVKÖRNING"} på ${objs.length} element.`);
   const { ok, fail, live } = await writeObjects(objs);
   log(`Klart: ${ok} ok, ${fail} fel.`);
   if (!live) { openDebug(true); return; }
@@ -732,20 +795,24 @@ async function brushTick(selFromEvent) {
     const sig = selSignature(sel);
     if (sig === B.sig) return;
     B.sig = sig;
-    const fresh = [];
+    const picked = [];
     for (const m of sel || []) {
-      const rids = (m.objectRuntimeIds || []).filter((r) => !B.done.has(m.modelId + ":" + r));
-      if (!rids.length) continue;
-      const ext = await toExternalIds(m.modelId, rids);
-      for (const r of rids) if (ext.has(r)) { B.done.add(m.modelId + ":" + r); fresh.push({ modelId: m.modelId, runtimeId: r, forms: idForms(ext.get(r)) }); }
+      const rids = (m.objectRuntimeIds || []).filter((r) => !B.done.has(K(m.modelId, r)));
+      rids.forEach((r) => B.done.add(K(m.modelId, r)));
+      if (rids.length) picked.push({ modelId: m.modelId, runtimeIds: rids });
     }
+    if (!picked.length) return;
+    const fresh = (await toElements(picked)).filter((o) => !B.done.has("el:" + K(o.modelId, o.runtimeId)));
+    fresh.forEach((o) => B.done.add("el:" + K(o.modelId, o.runtimeId)));
     if (!fresh.length) return;
-    // Färga direkt så att man ser att klicket tog
+    // Färga direkt de delar som elementet bestämmer över
     const byModel = new Map();
-    for (const o of fresh) { if (!byModel.has(o.modelId)) byModel.set(o.modelId, []); byModel.get(o.modelId).push(o.runtimeId); }
+    for (const o of fresh) for (const leaf of leavesOf(o.modelId, o.runtimeId)) {
+      const info = S.leafInfo && S.leafInfo.get(K(o.modelId, leaf));
+      if (!info || info.owner === o.runtimeId || info.owner === leaf) addTo(byModel, o.modelId, leaf);
+    }
     const color = colorFor(S.pick);
-    await loadKids(byModel);
-    if (color) await S.api.viewer.setObjectState(selectorFor(withKids(byModel)), { color, visible: true });
+    if (color && byModel.size) await S.api.viewer.setObjectState(selectorFor(byModel), { color, visible: true });
     const { ok } = await writeObjects(fresh);
     if (S.brush === B) { B.count += ok; renderWriteButton(); }
     moveInGroups(fresh, S.pick);
@@ -754,18 +821,26 @@ async function brushTick(selFromEvent) {
 }
 /** Uppdatera översiktens räknare lokalt efter penseldrag. */
 function moveInGroups(objs, status) {
-  if (!S.groups.size || !$("live").checked) return;
+  if (!S.groups.size || !$("live").checked || !S.leafGroups) return;
+  const remove = (groups, m, r) => { for (const byModel of groups.values()) { const ids = byModel.get(m); if (ids) { const i = ids.indexOf(r); if (i >= 0) ids.splice(i, 1); } } };
   for (const o of objs) {
-    for (const byModel of S.groups.values()) {
-      const ids = byModel.get(o.modelId);
-      if (ids) { const i = ids.indexOf(o.runtimeId); if (i >= 0) ids.splice(i, 1); }
-    }
+    const m = o.modelId, el = o.runtimeId;
+    remove(S.groups, m, el);
     if (!S.groups.has(status)) S.groups.set(status, new Map());
-    const g = S.groups.get(status);
-    if (!g.has(o.modelId)) g.set(o.modelId, []);
-    g.get(o.modelId).push(o.runtimeId);
+    addTo(S.groups.get(status), m, el);
+    for (const leaf of leavesOf(m, el)) {
+      const info = S.leafInfo.get(K(m, leaf));
+      if (info && info.owner !== el && info.owner !== leaf) {
+        if (info.owner !== topElement(m, leaf)) continue;   // delen har egen status på delnivå
+      }
+      remove(S.leafGroups, m, leaf);
+      if (!S.leafGroups.has(status)) S.leafGroups.set(status, new Map());
+      addTo(S.leafGroups.get(status), m, leaf);
+      S.leafInfo.set(K(m, leaf), { owner: el, status });
+    }
   }
-  for (const [k, byModel] of S.groups) if (![...byModel.values()].some((ids) => ids.length)) S.groups.delete(k);
+  const prune = (g) => { for (const [k, byModel] of g) if (![...byModel.values()].some((ids) => ids.length)) g.delete(k); };
+  prune(S.groups); prune(S.leafGroups);
   renderCards();
 }
 
@@ -796,32 +871,34 @@ async function buildTimeline() {
   const index = await loadPsetIndex(true);
   const elements = [], untracked = new Map();
   const todayMs = parseDay(todayYmd());
-  for (const m of (await S.api.viewer.getObjects()) || []) {
-    const rids = (m.objects || []).map((o) => o.id);
-    const ext = await toExternalIds(m.modelId, rids);
-    for (const rid of rids) {
-      const p = ext.has(rid) ? index.get(buildLink(tpl, idForms(ext.get(rid)), m.modelId)) : null;
-      if (!p) { if (!untracked.has(m.modelId)) untracked.set(m.modelId, []); untracked.get(m.modelId).push(rid); continue; }
+  const models = ((await S.api.viewer.getObjects()) || []).map((m) => ({ modelId: m.modelId, rids: (m.objects || []).map((o) => o.id) }));
+  const propsOf = new Map();
+  for (const { modelId, rids } of models) {
+    const ext = await toExternalIds(modelId, rids);
+    for (const r of rids) { const p = ext.has(r) ? index.get(buildLink(tpl, idForms(ext.get(r)), modelId)) : null; if (p) propsOf.set(K(modelId, r), p); }
+  }
+  await loadStructure(models, new Set(propsOf.keys()));
+  for (const { modelId, rids } of models) {
+    // Element = översta objekt som inte är behållare; data från elementet, annars från någon av dess delar
+    const tops = new Set();
+    for (const r of rids) { if (S.containers.has(K(modelId, r))) continue; tops.add(topElement(modelId, r)); }
+    for (const rid of tops) {
+      let p = propsOf.get(K(modelId, rid));
+      if (!p) for (const c of S.kids.get(K(modelId, rid)) || []) { p = propsOf.get(K(modelId, c)); if (p) break; }
+      if (!p || !Object.values(p).some(Boolean)) { addTo(untracked, modelId, rid); continue; }
       const e = {
-        modelId: m.modelId, rid,
+        modelId, rid,
         sent: parseDay(F.sent && p[F.sent]), made: parseDay(F.made && p[F.made]),
         installed: parseDay(F.installed && p[F.installed]), planned: parseDay(F.plannedDate && p[F.plannedDate]),
       };
-      // Bara veckonummer ifyllt → måndag den veckan (år från övriga datum, annars i år)
       if (!e.planned && F.plannedWeek && p[F.plannedWeek]) {
         const ref = e.installed || e.made || e.sent || todayMs;
         e.planned = mondayOfIsoWeek(isoWeekYear(ref), Number(p[F.plannedWeek]));
       }
+      if (!e.sent && !e.made && !e.installed && !e.planned) { addTo(untracked, modelId, rid); continue; }
       elements.push(e);
     }
   }
-  // Delar följer sitt element; de ska inte bli grå bakgrund
-  const trackedMap = new Map();
-  for (const e of elements) addTo(trackedMap, e.modelId, e.rid);
-  await loadKids(trackedMap);
-  const claimed = claimedKids(trackedMap);
-  const parents = await loadAncestors(trackedMap);
-  for (const [modelId, ids] of untracked) untracked.set(modelId, ids.filter((r) => !claimed.has(modelId + ":" + r) && !parents.has(modelId + ":" + r)));
   const dates = elements.flatMap((e) => [e.sent, e.made, e.installed, e.planned]).filter(Boolean);
   if (!dates.length) return (S.tl = { elements, untracked, weeks: [], sel: -1 });
 
@@ -872,7 +949,7 @@ async function applyWeek(i) {
       const wk = tl.weeks[tl.sel], mode = S.tlMode;
       if (!tl.painted) {
         await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
-        if ([...tl.untracked.values()].some((ids) => ids.length)) await S.api.viewer.setObjectState(selectorFor(tl.untracked), { color: TL_COLORS.ghost, visible: true });
+        if ([...tl.untracked.values()].some((ids) => ids.length)) await S.api.viewer.setObjectState(selectorFor(leavesMap(tl.untracked)), { color: TL_COLORS.ghost, visible: true });
         tl.painted = true;
       }
       const groups = new Map();
@@ -885,7 +962,7 @@ async function applyWeek(i) {
       }
       tl.counts = Object.fromEntries([...groups].map(([k, g]) => [k, [...g.values()].reduce((a, ids) => a + ids.length, 0)]));
       for (const [st, g] of groups) {
-        const sel = selectorFor(withKids(g));
+        const sel = selectorFor(leavesMap(g));
         if (st === "upcoming") {
           await S.api.viewer.setObjectState(sel, $("showUpcoming").checked ? { color: TL_COLORS.waiting, visible: true } : { visible: false });
         } else {
@@ -1162,7 +1239,7 @@ async function init() {
   $("btnColor").onclick = guard(colorModel);
   $("btnReset").onclick = guard(async () => {
     await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
-    S.groups = new Map(); S.hidden.clear(); renderCards();
+    S.groups = new Map(); S.leafGroups = new Map(); S.hidden.clear(); renderCards();
   });
   $("btnWrite").onclick = guard(writeSelected);
   $("btnClear").onclick = () => { $("log").innerHTML = ""; };

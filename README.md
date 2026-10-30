@@ -1,4 +1,4 @@
-# PMJ 4D – v0.8
+# PMJ 4D – v0.9
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -61,7 +61,11 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - *Hela kedjan:* visar hur långt varje element har kommit vid veckans slut: ritningar skickade (cyan), tillverkat (mörkblått), monterat (grönt) eller ej påbörjat (grått).
 - Element utan PMJ-data visas ljusgrå som bakgrund.
 
-**Element och delar:** PMJ-statusen sitter på elementet (Teklas cast unit). Elementets delar får samma färg och döljs eller visas tillsammans med elementet, och de räknas inte som "utan status". Överordnade objekt i modellstrukturen (projekt, byggnad, våningar) lämnas alltid orörda, eftersom Connect annars döljer allt under dem.
+**Element och delar:** Appen läser modellens struktur: behållare (projekt, byggnad, våningar), element (Teklas cast unit) och elementens delar.
+- Färg och synlighet sätts bara på delarna, alltså det man ser. Element och behållare rörs aldrig, eftersom Connect annars döljer allt under dem.
+- Varje del visar sin egen sparade status om den har en, annars elementets status och annars standardvärdet.
+- Korten räknar de objekt som bestämmer statusen, i praktiken elementen.
+- Appen sparar alltid på elementet, även om man markerat en del. Status som tidigare sparats på delnivå visas fortfarande, och Felsökning varnar för den.
 
 **Standardvärde:** Element som aldrig fått ett sparat värde räknas som bibliotekets standardvärde (ODOTTAA), precis som Connect visar dem. Länkmallen är modelloberoende (`{fileId}`), så flera IFC-filer och nya modellversioner fungerar.
 
