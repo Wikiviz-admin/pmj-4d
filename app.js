@@ -1,4 +1,4 @@
-/* PMJ 4D – v0.4
+/* PMJ 4D – v0.6
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -34,9 +34,16 @@ const T = {
     clearLog: "Töm logg", token: "Ny token", needSetup: "Gör inställningarna först (⚙).",
     stOk: "Ansluten", stWait: "Väntar på åtkomst", stBad: "Ingen anslutning", settings: "Inställningar",
     autoDates: "Fyll i dagens datum automatiskt (bara om fältet är tomt)",
-    autoHint: (f) => `+ ${f} = idag`, weekHint: (f) => `+ ${f} räknas ut`,
+    weekHint: (f, w) => `${f}: ${w} (räknas ut automatiskt)`,
+    autoNoteToday: "Idag – fylls bara i där fältet är tomt.", autoNoteSet: "Skrivs på alla markerade element.",
     brush: "🖌 Penselläge – klicka på element i 3D", brushTest: "🖌 Penselläge (provkörning)",
     brushOn: (n) => `🖌 Pensel på · ${n} sparade · klicka för att stänga`, pickFirst: "🖌 Välj en status först",
+    tab4d: "4D", modeSite: "Montage", modeChain: "Hela kedjan", today: "Idag", play: "▶ Spela upp", pause: "❚❚ Pausa",
+    wk: "Vecka", lgPlanned: "planerat", lgInstalled: "monterat", reload: "↻ Läs in på nytt",
+    stInstalled: "Monterade", stLate: "Försenade", stUpcoming: "Kommande", stSent: "Ritningar skickade",
+    stMade: "Tillverkade", stWaiting: "Ej påbörjade", showUpcoming: "Visa kommande element i grått",
+    emptyTl: "Inga datum att visa än. Fyll i Suunniteltu Asennuspäivä eller sätt status med automatiska datum.",
+    loadTl: "Läser in…",
   },
   fi: {
     setupTitle: "Asetukset", libId: "Kirjaston tunnus (PMJ master library)", load: "Lataa",
@@ -53,9 +60,16 @@ const T = {
     clearLog: "Tyhjennä loki", token: "Uusi token", needSetup: "Tee ensin asetukset (⚙).",
     stOk: "Yhdistetty", stWait: "Odottaa lupaa", stBad: "Ei yhteyttä", settings: "Asetukset",
     autoDates: "Täytä tämä päivä automaattisesti (vain jos kenttä on tyhjä)",
-    autoHint: (f) => `+ ${f} = tänään`, weekHint: (f) => `+ ${f} lasketaan`,
+    weekHint: (f, w) => `${f}: ${w} (lasketaan automaattisesti)`,
+    autoNoteToday: "Tänään – täytetään vain, jos kenttä on tyhjä.", autoNoteSet: "Kirjoitetaan kaikkiin valittuihin osiin.",
     brush: "🖌 Sivellintila – klikkaa osia 3D:ssä", brushTest: "🖌 Sivellintila (koeajo)",
     brushOn: (n) => `🖌 Sivellin päällä · ${n} tallennettu · sulje klikkaamalla`, pickFirst: "🖌 Valitse ensin tila",
+    tab4d: "4D", modeSite: "Asennus", modeChain: "Koko ketju", today: "Tänään", play: "▶ Toista", pause: "❚❚ Tauko",
+    wk: "Viikko", lgPlanned: "suunniteltu", lgInstalled: "asennettu", reload: "↻ Lue uudelleen",
+    stInstalled: "Asennettu", stLate: "Myöhässä", stUpcoming: "Tulossa", stSent: "Piirustukset lähetetty",
+    stMade: "Valmistettu", stWaiting: "Aloittamatta", showUpcoming: "Näytä tulevat osat harmaana",
+    emptyTl: "Ei vielä päivämääriä. Täytä Suunniteltu Asennuspäivä tai aseta tila automaattisilla päivämäärillä.",
+    loadTl: "Luetaan…",
   },
 };
 let LANG = "sv";
@@ -175,7 +189,71 @@ function isoWeek(ymd) {
   return 1 + Math.round(((d - firstThu) / 864e5 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
 }
 function todayYmd() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
-const label = (k) => S.labels[`${k}.name`] || S.labels[`${k}.title`] || S.labels[`${k}.label`] || S.labels[k] || k;
+const label = (k) => (S.labelMap && S.labelMap[k]) || S.labels[`${k}.name`] || S.labels[`${k}.title`] || S.labels[`${k}.label`] || S.labels[k] || k;
+
+/** Leta igenom hela definitionen efter en läsbar rubrik för varje intern nyckel (prop_xxx). */
+function buildLabelMap(def, keys) {
+  const hits = {};                      // key -> [{score, text}]
+  const NAMEISH = /^(name|title|label|displayname|caption|text)$/i;
+  const LANG = /^[a-z]{2}([-_][a-z]{2})?$/i;
+  (function walk(node, path) {
+    if (node == null) return;
+    if (typeof node === "string") {
+      for (let i = 0; i < path.length; i++) {
+        const k = path[i];
+        if (!keys.includes(k)) continue;
+        const next = path[i + 1];
+        let score = 0;
+        if (i === path.length - 1) score = 3;                              // {..., prop_x: "Rubrik"}
+        else if (next && NAMEISH.test(next) && i + 2 === path.length) score = 3;   // prop_x.name
+        else if (next && LANG.test(next) && i + 2 === path.length) score = 3;      // prop_x.fi
+        else if (next && NAMEISH.test(next) && LANG.test(path[i + 2] || "") && i + 3 === path.length) score = 3; // prop_x.name.fi
+        else if (next && /^description$/i.test(next) && i + 2 === path.length) score = 1;
+        const p = path.join(".");
+        if (/\benum\b/i.test(p)) score = 0;
+        if (!score) continue;
+        if (/(^|\.)fi(\.|$)/.test(p)) score += 0.5; else if (/(^|\.)en(\.|$)/.test(p)) score += 0.2;
+        (hits[k] = hits[k] || []).push({ score, text: node });
+      }
+      // i18n-nycklar som "prop_x.name" i ett platt objekt
+      const last = path[path.length - 1] || "";
+      const m = last.match(/^(.+?)\.(name|title|label)$/i);
+      if (m && keys.includes(m[1])) (hits[m[1]] = hits[m[1]] || []).push({ score: 3.4, text: node });
+      return;
+    }
+    if (typeof node === "object") for (const [k, v] of Object.entries(node)) walk(v, path.concat(k));
+  })(def, []);
+  const map = {};
+  for (const k of keys) {
+    const best = (hits[k] || []).filter((h) => h.text && h.text !== k && !/^(string|number|integer|boolean|date|date-time|array|object)$/i.test(h.text))
+      .sort((a, b) => b.score - a.score)[0];
+    if (best) map[k] = best.text;
+  }
+  return map;
+}
+
+/** PMJ-fälten: först via rubrik, annars via ordningen i PMJ-biblioteket. */
+function detectFields(keys) {
+  const find = (re) => keys.find((k) => re.test(squash(label(k))) || re.test(squash(k)));
+  const f = {
+    sent: find(/^piirustu(kset|s)lahetetty/),
+    made: find(/^valmistuspaivamaara/),
+    installed: find(/^asennuspaivamaara/),
+    plannedDate: find(/^suunniteltuasennuspaiva/),
+    plannedWeek: find(/^suunniteltuasennusviikko/),
+  };
+  const isDate = (k) => /date/i.test(`${S.props[k].format || ""} ${S.props[k].type || ""}`);
+  const isNum = (k) => /number|integer/i.test(S.props[k].type || "");
+  const dates = keys.filter(isDate), nums = keys.filter(isNum);
+  if (!f.sent && !f.made && !f.installed && !f.plannedDate && dates.length === 4) {
+    // PMJ master library: Piirustukset Lähetetty, Valmistuspäivämäärä, Suunniteltu Asennuspäivä, Asennuspäivämäärä
+    [f.sent, f.made, f.plannedDate, f.installed] = dates;
+    if (!f.plannedWeek && nums.length === 1) f.plannedWeek = nums[0];
+    f.byOrder = true;
+    log("Obs: fältens rubriker hittades inte i definitionen – använder ordningen i PMJ-biblioteket. Kontrollera i Connect att datumen hamnar rätt.", "e");
+  }
+  return f;
+}
 
 async function loadLibrary() {
   const libId = $("libId").value.trim();
@@ -200,24 +278,17 @@ async function loadDefinition() {
   S.labels = flattenI18n((def && (def.i18n || (def.schema && def.schema.i18n))) || {});
   S.psetIndex = null;
   const keys = Object.keys(S.props);
+  S.labelMap = buildLabelMap(def, keys);
+  log(`Hela definitionen (för felsökning): ${short(def, 20000)}`);
   const enumKeys = keys.filter((k) => Array.isArray(S.props[k].enum));
-  const dateKeys = keys.filter((k) => /date/i.test((S.props[k].format || "") + (S.props[k].type || "")) || /päivä|pvm|date/i.test(k + " " + label(k)));
   fillSelect($("statusKey"), enumKeys.length ? enumKeys : keys, label);
   const saved = store.get("statusKey");
   const auto = enumKeys.includes(saved) ? saved : enumKeys.find((k) => /kokoonpanon/i.test(k + " " + label(k))) || enumKeys[0];
   if (auto) $("statusKey").value = auto;
-  // Hitta PMJ-fälten via namn (tål att de interna nycklarna skiljer sig från rubrikerna)
-  const find = (re) => keys.find((k) => re.test(squash(label(k))) || re.test(squash(k)));
-  S.fields = {
-    sent: find(/^piirustu(kset|s)lahetetty/),
-    made: find(/^valmistuspaivamaara/),
-    installed: find(/^asennuspaivamaara/),
-    plannedDate: find(/^suunniteltuasennuspaiva/),
-    plannedWeek: find(/^suunniteltuasennusviikko/),
-  };
-  log({ upptäckta_fält: S.fields });
-  fillSelect($("dateKey"), dateKeys, label, "–");
-  const savedDate = store.get("dateKey"); if (dateKeys.includes(savedDate)) $("dateKey").value = savedDate;
+  S.fields = detectFields(keys);
+  log({ upptäckta_fält: Object.fromEntries(Object.entries(S.fields).map(([k, v]) => [k, v && v !== true ? `${label(v)} [${v}]` : v])) });
+  $("plannedLabel").textContent = S.fields.plannedDate ? (S.fields.byOrder ? "Suunniteltu Asennuspäivä" : label(S.fields.plannedDate)) : t("date");
+  $("plannedRow").hidden = !S.fields.plannedDate;
   renderStatusGrid();
   log(`Definition "${def && def.name}" laddad. Fält: ${keys.map((k) => `${label(k)} [${k}]`).join(", ")}`);
 }
@@ -324,25 +395,80 @@ async function showProps() {
   log({ modelId: m.modelId, runtimeId: rid, externalId: ext.get(rid), egenskaper: props });
 }
 
+// ---------- Elementhierarki (Tekla cast unit / IFC-assembly → delar) ----------
+// PMJ-statusen sitter på elementet, men geometrin ligger i dess delar. Delarna ska därför
+// följa elementets färg och synlighet, och inte räknas som "utan status".
+const ELEMENT_ASSEMBLY = 4;   // HierarchyType.ElementAssembly
+S.kids = new Map();           // "modelId:rid" -> [delarnas runtime-id]
+
+async function loadKids(byModel) {
+  for (const [modelId, ids] of byModel) {
+    const missing = ids.filter((r) => !S.kids.has(modelId + ":" + r));
+    if (!missing.length) continue;
+    // Snabbtest: har de här objekten över huvud taget några delar?
+    let probe = [];
+    try { probe = await S.api.viewer.getHierarchyChildren(modelId, missing.slice(0, 2000), ELEMENT_ASSEMBLY, true); }
+    catch (e) { log(`Hierarki kunde inte läsas (${e.message}) – delar följer inte sina element.`, "e"); }
+    if (!probe || !probe.length) { missing.forEach((r) => S.kids.set(modelId + ":" + r, [])); continue; }
+    log(`Läser elementens delar (${missing.length} element)…`);
+    const queue = missing.slice();
+    async function worker() {
+      while (queue.length) {
+        const r = queue.shift();
+        try {
+          const ch = await S.api.viewer.getHierarchyChildren(modelId, [r], ELEMENT_ASSEMBLY, true);
+          S.kids.set(modelId + ":" + r, (ch || []).map((c) => c.id).filter((id) => id !== r));
+        } catch { S.kids.set(modelId + ":" + r, []); }
+      }
+    }
+    await Promise.all(Array.from({ length: 8 }, worker));
+  }
+}
+/** Lägg till delarna till en {modelId -> ids}-karta (för färg och synlighet). */
+function withKids(byModel) {
+  const out = new Map();
+  for (const [modelId, ids] of byModel) {
+    const all = ids.slice();
+    for (const r of ids) { const k = S.kids.get(modelId + ":" + r); if (k && k.length) all.push(...k); }
+    out.set(modelId, all);
+  }
+  return out;
+}
+/** Alla delar som tillhör något av elementen (så att de inte räknas som "utan status"). */
+function claimedKids(byModel) {
+  const set = new Set();
+  for (const [modelId, ids] of byModel) for (const r of ids) for (const k of S.kids.get(modelId + ":" + r) || []) set.add(modelId + ":" + k);
+  return set;
+}
+const addTo = (map, modelId, rid) => { if (!map.has(modelId)) map.set(modelId, []); map.get(modelId).push(rid); };
+
 // ---------- Översikt ----------
 async function colorModel() {
+  if (S.tl) S.tl.painted = false;
   const tpl = $("linkTpl").value.trim(), key = $("statusKey").value;
   if (!tpl || !key) { openSetup(true); log(t("needSetup"), "e"); return; }
   const index = await loadPsetIndex(true);
   const models = await S.api.viewer.getObjects();
+  const tracked = new Map(), rest = new Map();   // element med status / övriga objekt
   S.groups = new Map();
   for (const m of models || []) {
     const rids = (m.objects || []).map((o) => o.id);
     const ext = await toExternalIds(m.modelId, rids);
     for (const rid of rids) {
-      if (!ext.has(rid)) continue;
-      const props = index.get(buildLink(tpl, idForms(ext.get(rid)), m.modelId));
+      const props = ext.has(rid) ? index.get(buildLink(tpl, idForms(ext.get(rid)), m.modelId)) : null;
       const v = props && props[key] ? String(props[key]) : NONE;
+      if (v === NONE) { addTo(rest, m.modelId, rid); continue; }
+      addTo(tracked, m.modelId, rid);
       if (!S.groups.has(v)) S.groups.set(v, new Map());
-      const byModel = S.groups.get(v);
-      if (!byModel.has(m.modelId)) byModel.set(m.modelId, []);
-      byModel.get(m.modelId).push(rid);
+      addTo(S.groups.get(v), m.modelId, rid);
     }
+  }
+  await loadKids(tracked);
+  const claimed = claimedKids(tracked);
+  for (const [modelId, ids] of rest) for (const rid of ids) {
+    if (claimed.has(modelId + ":" + rid)) continue;          // del av ett element med status
+    if (!S.groups.has(NONE)) S.groups.set(NONE, new Map());
+    addTo(S.groups.get(NONE), modelId, rid);
   }
   await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
   for (const [v, byModel] of S.groups) {
@@ -350,7 +476,7 @@ async function colorModel() {
     const state = {};
     if (color) state.color = color;
     if (S.hidden.has(v)) state.visible = false;
-    if (Object.keys(state).length) await S.api.viewer.setObjectState(selectorFor(byModel), state);
+    if (Object.keys(state).length) await S.api.viewer.setObjectState(selectorFor(withKids(byModel)), state);
   }
   renderCards();
 }
@@ -360,7 +486,7 @@ async function toggleStatus(v) {
   if (!byModel) return;
   const hide = !S.hidden.has(v);
   hide ? S.hidden.add(v) : S.hidden.delete(v);
-  await S.api.viewer.setObjectState(selectorFor(byModel), { visible: !hide });
+  await S.api.viewer.setObjectState(selectorFor(withKids(byModel)), { visible: !hide });
   renderCards();
 }
 
@@ -393,28 +519,43 @@ function renderStatusGrid() {
     b.style.setProperty("--c", colorFor(v));
     b.innerHTML = "<i></i><span></span>";
     b.querySelector("span").textContent = statusName(v);
-    b.onclick = () => { S.pick = S.pick === v ? "" : v; if (!S.pick && S.brush.on) stopBrush(); renderStatusGrid(); };
+    b.onclick = () => {
+      S.pick = S.pick === v ? "" : v;
+      if (!S.pick && S.brush.on) stopBrush();
+      $("autoDate").value = todayYmd();          // varje nytt statusval börjar med dagens datum
+      renderStatusGrid();
+    };
     grid.appendChild(b);
   }
   renderAutoHint();
   renderWriteButton();
 }
 function renderAutoHint() {
-  const lines = [];
   const auto = autoDateKey(S.pick);
-  if (auto && $("autoDates").checked && auto !== $("dateKey").value) lines.push(t("autoHint", label(auto)));
-  if ($("dateKey").value && $("dateKey").value === S.fields.plannedDate && S.fields.plannedWeek) lines.push(t("weekHint", label(S.fields.plannedWeek)));
-  $("autoHint").textContent = lines.join("   ");
-  $("autoHint").hidden = !lines.length;
+  $("autoRow").hidden = !auto;
+  if (auto) {
+    $("autoLabel").textContent = fieldName(auto);
+    const v = $("autoDate").value;
+    $("autoNote").textContent = !v ? "" : v === todayYmd() ? t("autoNoteToday") : t("autoNoteSet");
+  }
+  const dv = $("dateVal").value;
+  $("weekHint").hidden = !(dv && S.fields.plannedWeek);
+  if (dv && S.fields.plannedWeek) $("weekHint").textContent = t("weekHint", fieldName(S.fields.plannedWeek), isoWeek(dv));
 }
 function renderWriteButton() {
   const btn = $("btnWrite");
   btn.textContent = $("live").checked ? t("save", S.selCount) : t("test", S.selCount);
-  btn.disabled = S.brush.on || !S.selCount || (!S.pick && !($("dateKey").value && $("dateVal").value));
+  btn.disabled = S.brush.on || !S.selCount || (!S.pick && !(S.fields.plannedDate && $("dateVal").value));
   const br = $("btnBrush");
   br.classList.toggle("on", S.brush.on);
   br.disabled = !S.brush.on && !S.pick;
   br.textContent = S.brush.on ? t("brushOn", S.brush.count) : !S.pick ? t("pickFirst") : $("live").checked ? t("brush") : t("brushTest");
+}
+const FIELD_NAMES = { sent: "Piirustukset Lähetetty", made: "Valmistuspäivämäärä", installed: "Asennuspäivämäärä", plannedDate: "Suunniteltu Asennuspäivä", plannedWeek: "Suunniteltu Asennusviikko" };
+function fieldName(key) {
+  const role = Object.keys(FIELD_NAMES).find((r) => S.fields[r] === key);
+  const l = label(key);
+  return l !== key ? l : (role ? FIELD_NAMES[role] : key);
 }
 const autoDateKey = (status) => S.fields[AUTO_DATE_FOR[String(status || "").toUpperCase()]] || null;
 
@@ -430,13 +571,16 @@ function formatDate(key, ymd) {
 function propsFor(existing) {
   const props = {};
   if (S.pick) props[$("statusKey").value] = S.pick;
-  const dk = $("dateKey").value, dv = $("dateVal").value;
+  const dk = S.fields.plannedDate, dv = $("dateVal").value;
   if (dk && dv) {
     props[dk] = formatDate(dk, dv);
     if (dk === S.fields.plannedDate && S.fields.plannedWeek) props[S.fields.plannedWeek] = isoWeek(dv);
   }
-  const auto = autoDateKey(S.pick);
-  if (auto && $("autoDates").checked && !(auto in props) && !(existing && existing[auto])) props[auto] = formatDate(auto, todayYmd());
+  const auto = autoDateKey(S.pick), av = $("autoDate").value;
+  if (auto && av && !(auto in props)) {
+    const explicit = av !== todayYmd();            // användaren har valt ett annat datum
+    if (explicit || !(existing && existing[auto])) props[auto] = formatDate(auto, av);
+  }
   return props;
 }
 
@@ -458,6 +602,7 @@ async function writeObjects(objs) {
       try {
         await pset("PATCH", path, { props });
         index.set(link, { ...(index.get(link) || {}), ...props });   // håll lokala kopian i takt
+        S.tlDirty = true;
         ok++;
       } catch (e) { fail++; log(`Fel för ${o.forms.guid}: ${e.message}`, "e"); }
     }
@@ -519,7 +664,8 @@ async function brushTick(selFromEvent) {
     const byModel = new Map();
     for (const o of fresh) { if (!byModel.has(o.modelId)) byModel.set(o.modelId, []); byModel.get(o.modelId).push(o.runtimeId); }
     const color = colorFor(S.pick);
-    if (color) await S.api.viewer.setObjectState(selectorFor(byModel), { color });
+    await loadKids(byModel);
+    if (color) await S.api.viewer.setObjectState(selectorFor(withKids(byModel)), { color, visible: true });
     const { ok } = await writeObjects(fresh);
     if (S.brush === B) { B.count += ok; renderWriteButton(); }
     moveInGroups(fresh, S.pick);
@@ -541,6 +687,214 @@ function moveInGroups(objs, status) {
   }
   for (const [k, byModel] of S.groups) if (![...byModel.values()].some((ids) => ids.length)) S.groups.delete(k);
   renderCards();
+}
+
+// ---------- 4D-tidslinje ----------
+const TL_COLORS = { installed: "#3aa845", late: "#d64545", made: "#006393", sent: "#00c3dc", waiting: "#c3ccd3", ghost: "#eef1f3" };
+const DAY = 864e5;
+
+/** "2026-11-05", "2026-11-05T00:00:00Z" → UTC-midnatt (ms). */
+function parseDay(v) {
+  if (!v) return null;
+  const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+}
+const mondayOf = (ms) => { const d = new Date(ms); return ms - ((d.getUTCDay() + 6) % 7) * DAY; };
+function isoWeekYear(ms) { const d = new Date(mondayOf(ms) + 3 * DAY); return d.getUTCFullYear(); }
+function mondayOfIsoWeek(year, week) {
+  const jan4 = Date.UTC(year, 0, 4);
+  return mondayOf(jan4) + (week - 1) * 7 * DAY;
+}
+const ymdOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+const fmtDM = (ms) => { const d = new Date(ms); return `${d.getUTCDate()}.${d.getUTCMonth() + 1}.`; };
+
+/** Läs in alla element med deras datum och bygg veckorna. */
+async function buildTimeline() {
+  if (!setupComplete()) { openSetup(true); throw new Error(t("needSetup")); }
+  const tpl = $("linkTpl").value.trim(), F = S.fields;
+  const index = await loadPsetIndex(true);
+  const elements = [], untracked = new Map();
+  const todayMs = parseDay(todayYmd());
+  for (const m of (await S.api.viewer.getObjects()) || []) {
+    const rids = (m.objects || []).map((o) => o.id);
+    const ext = await toExternalIds(m.modelId, rids);
+    for (const rid of rids) {
+      const p = ext.has(rid) ? index.get(buildLink(tpl, idForms(ext.get(rid)), m.modelId)) : null;
+      if (!p) { if (!untracked.has(m.modelId)) untracked.set(m.modelId, []); untracked.get(m.modelId).push(rid); continue; }
+      const e = {
+        modelId: m.modelId, rid,
+        sent: parseDay(F.sent && p[F.sent]), made: parseDay(F.made && p[F.made]),
+        installed: parseDay(F.installed && p[F.installed]), planned: parseDay(F.plannedDate && p[F.plannedDate]),
+      };
+      // Bara veckonummer ifyllt → måndag den veckan (år från övriga datum, annars i år)
+      if (!e.planned && F.plannedWeek && p[F.plannedWeek]) {
+        const ref = e.installed || e.made || e.sent || todayMs;
+        e.planned = mondayOfIsoWeek(isoWeekYear(ref), Number(p[F.plannedWeek]));
+      }
+      elements.push(e);
+    }
+  }
+  // Delar följer sitt element; de ska inte bli grå bakgrund
+  const trackedMap = new Map();
+  for (const e of elements) addTo(trackedMap, e.modelId, e.rid);
+  await loadKids(trackedMap);
+  const claimed = claimedKids(trackedMap);
+  for (const [modelId, ids] of untracked) untracked.set(modelId, ids.filter((r) => !claimed.has(modelId + ":" + r)));
+  const dates = elements.flatMap((e) => [e.sent, e.made, e.installed, e.planned]).filter(Boolean);
+  if (!dates.length) return (S.tl = { elements, untracked, weeks: [], sel: -1 });
+
+  let start = mondayOf(Math.min(...dates, todayMs)), end = mondayOf(Math.max(...dates, todayMs));
+  const maxWeeks = 156;
+  if ((end - start) / (7 * DAY) > maxWeeks) {           // väldigt långa projekt: håll kring idag
+    start = Math.max(start, mondayOf(todayMs) - 78 * 7 * DAY);
+    end = Math.min(end, start + maxWeeks * 7 * DAY);
+  }
+  const weeks = [];
+  for (let mon = start; mon <= end; mon += 7 * DAY) weeks.push({ mon, end: mon + 7 * DAY - 1, planned: 0, installed: 0 });
+  const wIdx = (ms) => Math.floor((mondayOf(ms) - start) / (7 * DAY));
+  for (const e of elements) {
+    if (e.planned) { const i = wIdx(e.planned); if (weeks[i]) weeks[i].planned++; }
+    if (e.installed) { const i = wIdx(e.installed); if (weeks[i]) weeks[i].installed++; }
+  }
+  const now = Math.max(0, Math.min(weeks.length - 1, wIdx(todayMs)));
+  S.tl = { elements, untracked, weeks, sel: now, now, painted: false };
+  S.tlDirty = false;
+  log(`Tidslinje: ${elements.length} element med PMJ-data, ${weeks.length} veckor.`);
+  return S.tl;
+}
+
+/** Ett elements tillstånd i slutet av en vecka. */
+function stateAt(e, endMs, mode) {
+  const done = (d) => d && d <= endMs;
+  if (mode === "chain") {
+    if (done(e.installed)) return "installed";
+    if (done(e.made)) return "made";
+    if (done(e.sent)) return "sent";
+    return "waiting";
+  }
+  if (done(e.installed)) return "installed";
+  if (done(e.planned)) return "late";
+  return "upcoming";
+}
+
+async function applyWeek(i) {
+  const tl = S.tl;
+  if (!tl || !tl.weeks.length) return;
+  tl.sel = Math.max(0, Math.min(tl.weeks.length - 1, i));
+  renderTimeline();
+  if (tl.applying) { tl.pending = true; return; }    // uppspelning: hoppa till senaste begäran
+  tl.applying = true;
+  try {
+    do {
+      tl.pending = false;
+      const wk = tl.weeks[tl.sel], mode = S.tlMode;
+      if (!tl.painted) {
+        await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
+        if ([...tl.untracked.values()].some((ids) => ids.length)) await S.api.viewer.setObjectState(selectorFor(tl.untracked), { color: TL_COLORS.ghost, visible: true });
+        tl.painted = true;
+      }
+      const groups = new Map();
+      for (const e of tl.elements) {
+        const st = stateAt(e, wk.end, mode);
+        if (!groups.has(st)) groups.set(st, new Map());
+        const g = groups.get(st);
+        if (!g.has(e.modelId)) g.set(e.modelId, []);
+        g.get(e.modelId).push(e.rid);
+      }
+      tl.counts = Object.fromEntries([...groups].map(([k, g]) => [k, [...g.values()].reduce((a, ids) => a + ids.length, 0)]));
+      for (const [st, g] of groups) {
+        const sel = selectorFor(withKids(g));
+        if (st === "upcoming") {
+          await S.api.viewer.setObjectState(sel, $("showUpcoming").checked ? { color: TL_COLORS.waiting, visible: true } : { visible: false });
+        } else {
+          await S.api.viewer.setObjectState(sel, { color: TL_COLORS[st], visible: true });
+        }
+      }
+      renderTlStats();
+    } while (tl.pending);
+  } finally { tl.applying = false; }
+}
+
+function renderTimeline() {
+  const tl = S.tl, strip = $("strip");
+  const has = tl && tl.weeks.length;
+  $("tlBody").hidden = !has;
+  $("tlEmpty").hidden = !!has;
+  if (!has) { $("tlEmpty").textContent = tl ? t("emptyTl") : t("loadTl"); return; }
+  const max = Math.max(1, ...tl.weeks.map((w) => Math.max(w.planned, w.installed)));
+  if (strip.childElementCount !== tl.weeks.length) {
+    strip.innerHTML = "";
+    tl.weeks.forEach((w, i) => {
+      const c = document.createElement("div");
+      c.className = "wkc";
+      c.title = `${t("wk")} ${isoWeek(ymdOf(w.mon))}: ${w.planned} ${t("lgPlanned")}, ${w.installed} ${t("lgInstalled")}`;
+      c.innerHTML = `<div class="p"></div><div class="a"></div><span class="l"></span>`;
+      c.querySelector(".p").style.height = `${(w.planned / max) * 100}%`;
+      c.querySelector(".a").style.height = `${(w.installed / max) * 100}%`;
+      c.onclick = () => { stopPlay(); guard(() => applyWeek(i))(); };
+      strip.appendChild(c);
+    });
+  }
+  [...strip.children].forEach((c, i) => {
+    const wn = isoWeek(ymdOf(tl.weeks[i].mon));
+    c.classList.toggle("sel", i === tl.sel);
+    c.classList.toggle("now", i === tl.now);
+    c.classList.toggle("past", i < tl.sel);
+    c.querySelector(".l").textContent = (i === tl.sel || wn % 4 === 1) ? wn : "";
+  });
+  const sel = strip.children[tl.sel];
+  if (sel) strip.scrollLeft = Math.max(0, sel.offsetLeft - strip.clientWidth / 2);
+  const w = tl.weeks[tl.sel];
+  $("wkTitle").textContent = `${t("wk")} ${isoWeek(ymdOf(w.mon))}`;
+  $("wkDates").textContent = `${fmtDM(w.mon)}–${fmtDM(w.end)}${new Date(w.end).getUTCFullYear()}`;
+  $("tlPlay").textContent = S.tlTimer ? t("pause") : t("play");
+}
+
+function renderTlStats() {
+  const c = (S.tl && S.tl.counts) || {};
+  const items = S.tlMode === "chain"
+    ? [["sent", "stSent"], ["made", "stMade"], ["installed", "stInstalled"], ["waiting", "stWaiting"]]
+    : [["installed", "stInstalled"], ["late", "stLate"], ["upcoming", "stUpcoming"]];
+  const box = $("tlStats");
+  box.innerHTML = "";
+  for (const [k, lab] of items) {
+    const d = document.createElement("div");
+    d.className = "card";
+    d.style.setProperty("--c", TL_COLORS[k] || TL_COLORS.waiting);
+    d.innerHTML = `<div class="n"></div><div class="t"></div>`;
+    d.querySelector(".n").textContent = c[k] || 0;
+    d.querySelector(".t").textContent = t(lab);
+    box.appendChild(d);
+  }
+}
+
+function play() {
+  const tl = S.tl;
+  if (!tl || !tl.weeks.length) return;
+  if (S.tlTimer) return stopPlay();
+  if (tl.sel >= tl.weeks.length - 1) tl.sel = 0;        // börja om från början
+  S.tlTimer = setInterval(() => {
+    if (!S.tl || S.tl.sel >= S.tl.weeks.length - 1) return stopPlay();
+    applyWeek(S.tl.sel + 1).catch((e) => { log(e.message, "e"); stopPlay(); });
+  }, 800);
+  applyWeek(tl.sel);
+}
+function stopPlay() { clearInterval(S.tlTimer); S.tlTimer = null; if (S.tl) renderTimeline(); }
+
+async function open4d(force) {
+  if (force || !S.tl || S.tlDirty) {
+    stopPlay();
+    await buildTimeline();
+  }
+  renderTimeline();
+  if (S.tl && S.tl.weeks.length) { S.tl.painted = false; await applyWeek(S.tl.sel); }
+}
+function setMode(mode) {
+  S.tlMode = mode;
+  $("mSite").classList.toggle("on", mode === "site");
+  $("mChain").classList.toggle("on", mode === "chain");
+  $("showUpcoming").parentElement.hidden = mode === "chain";
+  if (S.tl) applyWeek(S.tl.sel).catch((e) => log(e.message, "e"));
 }
 
 // ---------- Automatisk upptäckt ----------
@@ -640,6 +994,7 @@ function applyLang() {
   $("btnLang").textContent = LANG === "sv" ? "FI" : "SV";
   $("btnSetup").title = t("settings");
   renderStatusGrid(); renderCards(); setDot();
+  if (S.tl) { renderTimeline(); renderTlStats(); }
 }
 function setDot() {
   const d = $("dot");
@@ -649,10 +1004,12 @@ function setDot() {
 }
 const openSetup = (on) => { $("setup").hidden = !on; };
 const openDebug = (on) => { $("debug").hidden = !on; };
-function showTab(fill) {
-  $("tabView").classList.toggle("on", !fill); $("tabFill").classList.toggle("on", fill);
-  $("paneView").hidden = fill; $("paneFill").hidden = !fill;
-  if (fill && S.api) guard(readSelection)();
+function showTab(which) {
+  const tabs = { view: ["tabView", "paneView"], fill: ["tabFill", "paneFill"], d4: ["tab4d", "pane4d"] };
+  for (const [k, [tab, pane]] of Object.entries(tabs)) { $(tab).classList.toggle("on", k === which); $(pane).hidden = k !== which; }
+  if (which !== "d4") stopPlay();
+  if (which === "fill" && S.api) guard(readSelection)();
+  if (which === "d4" && S.api) guard(() => open4d(false))();
 }
 
 function onEvent(event, data) {
@@ -690,16 +1047,30 @@ async function init() {
   $("btnSetup").onclick = () => openSetup($("setup").hidden);
   $("btnSetupDone").onclick = () => openSetup(false);
   $("btnDebug").onclick = () => openDebug($("debug").hidden);
-  $("tabView").onclick = () => showTab(false);
-  $("tabFill").onclick = () => showTab(true);
+  $("tabView").onclick = () => showTab("view");
+  $("tabFill").onclick = () => showTab("fill");
+  $("tab4d").onclick = () => showTab("d4");
+  S.tlMode = "site";
+  $("mSite").onclick = () => setMode("site");
+  $("mChain").onclick = () => setMode("chain");
+  $("tlPlay").onclick = play;
+  $("tlPrev").onclick = () => { stopPlay(); if (S.tl) guard(() => applyWeek(S.tl.sel - 1))(); };
+  $("tlNext").onclick = () => { stopPlay(); if (S.tl) guard(() => applyWeek(S.tl.sel + 1))(); };
+  $("tlToday").onclick = () => { stopPlay(); if (S.tl) guard(() => applyWeek(S.tl.now))(); };
+  $("tlReload").onclick = guard(() => open4d(true));
+  $("showUpcoming").onchange = () => { if (S.tl) guard(() => applyWeek(S.tl.sel))(); };
+  document.addEventListener("keydown", (ev) => {
+    if ($("pane4d").hidden || !S.tl || /INPUT|SELECT/.test(ev.target.tagName)) return;
+    if (ev.key === "ArrowLeft") { stopPlay(); applyWeek(S.tl.sel - 1); }
+    if (ev.key === "ArrowRight") { stopPlay(); applyWeek(S.tl.sel + 1); }
+  });
   $("btnLib").onclick = guard(loadLibrary);
   $("defId").onchange = guard(loadDefinition);
   $("statusKey").onchange = () => { store.set("statusKey", $("statusKey").value); S.pick = ""; if (S.brush.on) stopBrush(); renderStatusGrid(); };
-  $("dateKey").onchange = () => { store.set("dateKey", $("dateKey").value); renderAutoHint(); renderWriteButton(); };
-  $("autoDates").checked = store.get("autoDates") !== "0";
-  $("autoDates").onchange = () => { store.set("autoDates", $("autoDates").checked ? "1" : "0"); renderAutoHint(); };
+  $("autoDate").value = todayYmd();
+  $("autoDate").oninput = renderAutoHint;
   $("btnBrush").onclick = guard(toggleBrush);
-  $("dateVal").oninput = renderWriteButton;
+  $("dateVal").oninput = () => { renderAutoHint(); renderWriteButton(); };
   $("live").onchange = () => { if (S.brush.on) stopBrush(); renderWriteButton(); };
   $("linkTpl").onchange = () => store.set("linkTpl", $("linkTpl").value.trim());
   $("region").onchange = () => store.set("region", $("region").value);

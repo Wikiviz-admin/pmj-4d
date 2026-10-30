@@ -1,4 +1,4 @@
-# PMJ 4D – v0.4
+# PMJ 4D – v0.6
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -47,13 +47,21 @@ Allt sparas per projekt i webbläsaren. ⚙ öppnas bara om något inte kunde hi
 
 **Fyll i:** Markera objekt i 3D, klicka på en status och lägg eventuellt till ett datum. Utan bocken *Spara på riktigt* blir det en provkörning, och anropen visas under *Felsökning*. Med bocken sparas värdena och modellen färgas om. Testa gärna på en kopia av projektet först.
 
-**Automatiska datum** (kan stängas av) fyller bara i datum där fältet är tomt. Ett datum som redan finns skrivs aldrig över.
-- PIIRUSTUS OK → *Piirustukset Lähetetty* = idag
-- VALMISTETTU → *Valmistuspäivämäärä* = idag
-- ASENNETTU → *Asennuspäivämäärä* = idag
-- När du anger *Suunniteltu Asennuspäivä* räknas *Suunniteltu Asennusviikko* ut automatiskt (ISO-vecka).
+**Datum:** När du väljer en status som har ett eget datumfält visas det fältet med dagens datum ifyllt:
+- PIIRUSTUS OK → *Piirustukset Lähetetty*
+- VALMISTETTU → *Valmistuspäivämäärä*
+- ASENNETTU → *Asennuspäivämäärä*
+
+Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer du ett annat datum, till exempel i går, skrivs det på alla markerade element. Töm fältet om du inte vill skriva något datum alls. *Suunniteltu Asennuspäivä* har ett eget fält, och *Suunniteltu Asennusviikko* räknas ut automatiskt.
 
 **Penselläge:** Välj en status och klicka på 🖌. Därefter sparas statusen på varje element du klickar på i 3D, och elementet färgas direkt. Klicka på knappen igen för att stänga penselläget. Ett element som redan har penslats skrivs inte igen under samma penseldrag.
+
+**4D:** En veckoremsa visar planerade monteringar (ljusblått) och verkliga monteringar (grönt) vecka för vecka. Klicka på en vecka, använd ‹ › eller piltangenterna, eller tryck *Spela upp*.
+- *Montage:* monterade element visas gröna, försenade röda (planerat datum har passerat men elementet är inte monterat) och kommande döljs. Byggnaden växer alltså fram vecka för vecka.
+- *Hela kedjan:* visar hur långt varje element har kommit vid veckans slut: ritningar skickade (cyan), tillverkat (mörkblått), monterat (grönt) eller ej påbörjat (grått).
+- Element utan PMJ-data visas ljusgrå som bakgrund.
+
+**Element och delar:** PMJ-statusen sitter på elementet (Teklas cast unit). Elementets delar får samma färg och döljs eller visas tillsammans med elementet, och de räknas inte som "utan status".
 
 Om något går fel: öppna *Felsökning*, klicka *Kopiera logg* och klistra in loggen till Claude.
 
