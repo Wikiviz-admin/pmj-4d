@@ -1,0 +1,10 @@
+{
+  "title": "PMJ kortti (popover)",
+  "description": "Uppgifter om markerat element (PMJ 4D, kortläge – test av popover-placering)",
+  "url": "https://DITT-GITHUB-NAMN.github.io/pmj-4d/index.html?mode=card",
+  "icon": "https://DITT-GITHUB-NAMN.github.io/pmj-4d/icon.svg",
+  "extensionType": ["3dviewer"],
+  "type": "popover",
+  "height": "300px",
+  "enabled": true
+}

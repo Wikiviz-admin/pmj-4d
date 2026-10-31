@@ -1,4 +1,4 @@
-/* PMJ 4D – v1.2
+/* PMJ 4D – v1.3
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -1165,8 +1165,6 @@ async function refreshInfo(sel) {
     renderInfoOne(product, props, vals);
   } catch (e) {
     if (seq === S.info.seq) log(`Infokort: ${e.message}`, "e");
-  } finally {
-    if (seq === S.info.seq) box.hidden = false;
   }
 }
 
@@ -1179,6 +1177,7 @@ function setStatusChip(st) {
 }
 function renderInfoEmpty() {
   S.info.lastKey = null;
+  $("info").parentElement.hidden = true;        // inget markerat → inget kort
   $("info").classList.add("blank");
   $("infoTitle").textContent = t("infoNone");
   $("infoMark").textContent = ""; $("infoMark").className = "imark";
@@ -1187,6 +1186,7 @@ function renderInfoEmpty() {
   if (!$("infoCfg").hidden) renderInfoCfg();
 }
 function renderInfoMulti(n, counts) {
+  $("info").parentElement.hidden = false;
   $("info").classList.remove("blank");
   $("infoTitle").textContent = t("infoMulti", n);
   $("infoMark").textContent = ""; $("infoMark").className = "imark";
@@ -1209,6 +1209,7 @@ function flashInfo(key) {
   box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash");
 }
 function renderInfoOne(product, props, vals) {
+  $("info").parentElement.hidden = false;
   $("info").classList.remove("blank");
   $("infoTitle").textContent = product || "–";
   const mark = findProp(props, markId());
@@ -1399,8 +1400,8 @@ function setDot() {
   else if (S.connected) { d.className = "dot"; d.title = t("stWait"); }
   else { d.className = "dot bad"; d.title = t("stBad"); }
 }
-const openSetup = (on) => { $("setup").hidden = !on; };
-const openDebug = (on) => { $("debug").hidden = !on; };
+const openSetup = (on) => { $("setup").hidden = !on || (CARD_MODE && on && !S.userSetup); };
+const openDebug = (on) => { $("debug").hidden = !on || (CARD_MODE && on); };
 function showTab(which) {
   const tabs = { view: ["tabView", "paneView"], fill: ["tabFill", "paneFill"], d4: ["tab4d", "pane4d"] };
   for (const [k, [tab, pane]] of Object.entries(tabs)) { $(tab).classList.toggle("on", k === which); $(pane).hidden = k !== which; }
@@ -1438,7 +1439,9 @@ function guard(fn) {
   };
 }
 
+const CARD_MODE = new URLSearchParams(location.search).get("mode") === "card";
 async function init() {
+  if (CARD_MODE) document.body.classList.add("cardmode");
   LANG = store.get("lang") || "sv";
   { const v = store.get("linkTpl"); if (v) $("linkTpl").value = v; }
   $("btnLang").onclick = () => { LANG = LANG === "sv" ? "fi" : "sv"; store.set("lang", LANG); applyLang(); };

@@ -129,6 +129,12 @@
   .cfglist label { display:flex; gap:6px; align-items:center; color:var(--ink); font-size:12px; margin:2px 0; }
   .cfglist label small { color:var(--muted); margin-left:auto; padding-left:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:45%; }
 
+  /* Kortläge: samma app som liten extension (Connects egenskapspanel / popover) */
+  body.cardmode > *:not(.infowrap):not(script) { display:none !important; }
+  body.cardmode { min-height:0; background:transparent; }
+  body.cardmode .infowrap { position:static; padding:6px; margin:0; }
+  body.cardmode .info { box-shadow:0 0 0 1px rgba(0,99,147,.22); }
+
   /* Inställningar & felsökning */
   .drawer { background:var(--soft); border-bottom:1px solid var(--line); padding:12px; }
   .drawer h3 { margin:0 0 8px; font-size:12px; color:var(--navy); }
@@ -234,7 +240,7 @@
   <button id="btnToken" class="btn ghost" data-t="token"></button>
 </div>
 
-<div class="infowrap"><section id="info" class="info">
+<div class="infowrap" hidden><section id="info" class="info">
   <div class="ihead">
     <div class="iname"><div id="infoTitle" class="ititle"></div><div id="infoMark" class="imark"></div></div>
     <span id="infoStatus" class="ichip" hidden></span>

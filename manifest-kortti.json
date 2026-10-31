@@ -1,0 +1,10 @@
+{
+  "title": "PMJ kortti",
+  "description": "Uppgifter om markerat element (PMJ 4D, kortläge)",
+  "url": "https://DITT-GITHUB-NAMN.github.io/pmj-4d/index.html?mode=card",
+  "icon": "https://DITT-GITHUB-NAMN.github.io/pmj-4d/icon.svg",
+  "extensionType": ["3dviewer"],
+  "type": "properties",
+  "height": "300px",
+  "enabled": true
+}
