@@ -1,4 +1,4 @@
-# PMJ 4D – v1.3
+# PMJ 4D – v1.2
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -67,12 +67,6 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - Upp till 5 små kort med valfria PMJ-fält och modellegenskaper. Ifyllda datum visas med ✓ och datum, och planerat datum visas med veckonummer.
 - Markerar man flera element visas antal per status.
 - ⚙ i kortet: välj vilken modellegenskap elementnumret hämtas från (listan visar egenskaperna för det markerade elementet), och vilka kort som visas. Valen sparas i webbläsaren.
-
-**Kortet som egen extension (test):** Samma app kan köras som ett litet kort utanför panelen, eftersom en webbsida inte kan rita utanför sin egen ruta i Connect. Två manifest finns att prova:
-- `manifest-kortti.json` – placering `properties` (i Connects egenskapspanel, höjd 300 px)
-- `manifest-kortti-popover.json` – placering `popover` (troligen ett flytande fönster)
-
-Byt `DITT-GITHUB-NAMN` i filerna och lägg till dem som egna extensions med samma steg som huvudmanifestet. Kortet visas bara när något är markerat.
 
 **Element och delar:** Appen läser modellens struktur: behållare (projekt, byggnad, våningar), element (Teklas cast unit) och elementens delar.
 - Färg och synlighet sätts bara på delarna, alltså det man ser. Element och behållare rörs aldrig, eftersom Connect annars döljer allt under dem.
