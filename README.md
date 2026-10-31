@@ -1,4 +1,4 @@
-# PMJ 4D – v1.0
+# PMJ 4D – v1.1
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -61,7 +61,7 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - *Hela kedjan:* visar hur långt varje element har kommit vid veckans slut: ritningar skickade (cyan), tillverkat (mörkblått), monterat (grönt) eller ej påbörjat (grått).
 - Element utan PMJ-data visas ljusgrå som bakgrund.
 
-**Infokortet** längst ner i panelen visar det markerade elementet, även om man klickat på en del:
+**Infokortet** är fäst längst ner i panelen och visar det markerade elementet, även om man klickat på en del:
 - Produktnamnet (t.ex. *Seinäelementti*) och under det elementnumret. Som standard hämtas numret från *Tekla Assembly › Assembly/Cast unit Mark*.
 - Statusen som ett färgat märke.
 - Upp till 5 små kort med valfria PMJ-fält och modellegenskaper. Ifyllda datum visas med ✓ och datum, och planerat datum visas med veckonummer.

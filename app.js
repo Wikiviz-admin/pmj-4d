@@ -1,4 +1,4 @@
-/* PMJ 4D – v1.0
+/* PMJ 4D – v1.1
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.

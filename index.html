@@ -10,7 +10,8 @@
     --ink:#1f2a33; --muted:#71808c; --line:#e3e8ec; --soft:#f4f8fa;
   }
   * { box-sizing:border-box; }
-  body { margin:0; font:13px/1.45 "Open Sans",Segoe UI,Arial,sans-serif; color:var(--ink); background:#fff; }
+  body { margin:0; font:13px/1.45 "Open Sans",Segoe UI,Arial,sans-serif; color:var(--ink); background:#fff;
+         display:flex; flex-direction:column; min-height:100vh; }
   button { font:inherit; cursor:pointer; }
   [hidden] { display:none !important; }
 
@@ -91,7 +92,9 @@
   .switch { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:12px; color:var(--muted); }
 
   /* Infokort för markerat element */
-  .info { margin:4px 12px 10px; border:1px solid var(--line); border-radius:10px; padding:10px 12px 12px; position:relative; overflow:hidden; background:#fff; }
+  .infowrap { position:sticky; bottom:0; margin-top:auto; background:#fff; padding:8px 12px 10px; z-index:5; flex:none; }
+  .info { border:1px solid var(--line); border-radius:10px; padding:10px 12px 12px; overflow:hidden; background:#fff; position:relative;
+          box-shadow:0 -4px 14px rgba(0,40,70,.08); }
   .info::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--ic, var(--line)); }
   .ihead { display:flex; align-items:flex-start; gap:8px; }
   .iname { flex:1; min-width:0; }
@@ -211,7 +214,17 @@
   </div>
 </main>
 
-<section id="info" class="info">
+
+<div style="padding:0 12px 10px"><button id="btnDebug" class="icon" data-t="debug"></button></div>
+<div id="debug" class="drawer" hidden>
+  <pre id="log"></pre>
+  <button id="btnProps" class="btn ghost" data-t="props"></button>
+  <button id="btnCopy" class="btn ghost" data-t="copy"></button>
+  <button id="btnClear" class="btn ghost" data-t="clearLog"></button>
+  <button id="btnToken" class="btn ghost" data-t="token"></button>
+</div>
+
+<div class="infowrap"><section id="info" class="info">
   <div class="ihead">
     <div class="iname"><div id="infoTitle" class="ititle"></div><div id="infoMark" class="imark"></div></div>
     <span id="infoStatus" class="ichip" hidden></span>
@@ -224,15 +237,7 @@
     <label style="margin-top:10px" data-t="cfgFields"></label>
     <div id="cfgFields" class="cfglist"></div>
   </div>
-</section>
-<div style="padding:0 12px 10px"><button id="btnDebug" class="icon" data-t="debug"></button></div>
-<div id="debug" class="drawer" hidden>
-  <pre id="log"></pre>
-  <button id="btnProps" class="btn ghost" data-t="props"></button>
-  <button id="btnCopy" class="btn ghost" data-t="copy"></button>
-  <button id="btnClear" class="btn ghost" data-t="clearLog"></button>
-  <button id="btnToken" class="btn ghost" data-t="token"></button>
-</div>
+</section></div>
 
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
 <script src="app.js"></script>
