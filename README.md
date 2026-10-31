@@ -1,4 +1,4 @@
-# PMJ 4D – v0.9
+# PMJ 4D – v1.0
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -60,6 +60,13 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - *Montage:* monterade element visas gröna, försenade röda (planerat datum har passerat men elementet är inte monterat) och kommande döljs. Byggnaden växer alltså fram vecka för vecka.
 - *Hela kedjan:* visar hur långt varje element har kommit vid veckans slut: ritningar skickade (cyan), tillverkat (mörkblått), monterat (grönt) eller ej påbörjat (grått).
 - Element utan PMJ-data visas ljusgrå som bakgrund.
+
+**Infokortet** längst ner i panelen visar det markerade elementet, även om man klickat på en del:
+- Produktnamnet (t.ex. *Seinäelementti*) och under det elementnumret. Som standard hämtas numret från *Tekla Assembly › Assembly/Cast unit Mark*.
+- Statusen som ett färgat märke.
+- Upp till 5 små kort med valfria PMJ-fält och modellegenskaper. Ifyllda datum visas med ✓ och datum, och planerat datum visas med veckonummer.
+- Markerar man flera element visas antal per status.
+- ⚙ i kortet: välj vilken modellegenskap elementnumret hämtas från (listan visar egenskaperna för det markerade elementet), och vilka kort som visas. Valen sparas i webbläsaren.
 
 **Element och delar:** Appen läser modellens struktur: behållare (projekt, byggnad, våningar), element (Teklas cast unit) och elementens delar.
 - Färg och synlighet sätts bara på delarna, alltså det man ser. Element och behållare rörs aldrig, eftersom Connect annars döljer allt under dem.

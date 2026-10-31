@@ -1,4 +1,4 @@
-/* PMJ 4D – v0.9
+/* PMJ 4D – v1.0
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -44,6 +44,9 @@ const T = {
     stMade: "Tillverkade", stWaiting: "Ej påbörjade", showUpcoming: "Visa kommande element i grått",
     emptyTl: "Inga datum att visa än. Fyll i Suunniteltu Asennuspäivä eller sätt status med automatiska datum.",
     loadTl: "Läser in…",
+    infoNone: "Markera ett element i 3D för att se dess uppgifter.", infoMulti: (n) => `${n} element markerade`,
+    noMark: "Inget elementnummer", cfgMark: "Elementnummer hämtas från", cfgFields: "Visa i korten (max 5)",
+    modelGroup: "Modellen", cfgPick: "Markera ett element för att se modellens egenskaper.", wkShort: "v",
   },
   fi: {
     setupTitle: "Asetukset", libId: "Kirjaston tunnus (PMJ master library)", load: "Lataa",
@@ -70,6 +73,9 @@ const T = {
     stMade: "Valmistettu", stWaiting: "Aloittamatta", showUpcoming: "Näytä tulevat osat harmaana",
     emptyTl: "Ei vielä päivämääriä. Täytä Suunniteltu Asennuspäivä tai aseta tila automaattisilla päivämäärillä.",
     loadTl: "Luetaan…",
+    infoNone: "Valitse osa 3D:ssä nähdäksesi sen tiedot.", infoMulti: (n) => `${n} elementtiä valittu`,
+    noMark: "Ei elementtitunnusta", cfgMark: "Elementtitunnus haetaan kentästä", cfgFields: "Näytä korteissa (max 5)",
+    modelGroup: "Malli", cfgPick: "Valitse osa nähdäksesi mallin ominaisuudet.", wkShort: "vk",
   },
 };
 let LANG = "sv";
@@ -320,6 +326,7 @@ async function loadDefinition() {
   $("plannedLabel").textContent = S.fields.plannedDate ? (S.fields.byOrder ? "Suunniteltu Asennuspäivä" : label(S.fields.plannedDate)) : t("date");
   $("plannedRow").hidden = !S.fields.plannedDate;
   renderStatusGrid();
+  if (S.api) refreshInfo();
   log(`Definition "${def && def.name}" laddad. Fält: ${keys.map((k) => `${label(k)} [${k}]`).join(", ")}`);
 }
 
@@ -525,6 +532,11 @@ async function loadStructure(models, statusKeys) {
     if (odd.length) { await loadChildren(modelId, odd); odd.forEach((r) => S.containers.delete(K(modelId, r))); changed = true; }
   }
   if (changed) rebuildPartOf();
+}
+// Endast en inläsning åt gången (markeringen kan ändras medan strukturen läses)
+{
+  const inner = loadStructure;
+  loadStructure = (...args) => (S.structLock = (S.structLock || Promise.resolve()).then(() => inner(...args), () => inner(...args)));
 }
 const isLeaf = (m, r) => !S.asm.has(K(m, r)) && !S.containers.has(K(m, r));
 /** Översta elementet ett objekt hör till (eller objektet självt). */
@@ -762,6 +774,7 @@ async function writeSelected() {
   const { ok, fail, live } = await writeObjects(objs);
   log(`Klart: ${ok} ok, ${fail} fel.`);
   if (!live) { openDebug(true); return; }
+  refreshInfo();
   if (S.groups.size) await colorModel();   // visa resultatet direkt
 }
 
@@ -1056,6 +1069,220 @@ function setMode(mode) {
   if (S.tl) applyWeek(S.tl.sel).catch((e) => log(e.message, "e"));
 }
 
+// ---------- Infokort: det markerade elementet ----------
+const DEFAULT_MARK = "Tekla Assembly|Assembly/Cast unit Mark";
+const MAX_CARDS = 5;
+S.info = { seq: 0, sig: "", model: [] };   // model = egenskaper för senast visade objekt (för ⚙-listan)
+
+/** Platta ut viewerns egenskaper till [{set, name, value}]. */
+function flatProps(o) {
+  const out = [];
+  for (const ps of (o && o.properties) || []) {
+    const set = ps.set || ps.name || "";
+    for (const p of ps.properties || []) if (p && p.name != null) out.push({ set, name: String(p.name), value: p.value });
+  }
+  return out;
+}
+async function objectInfo(modelId, rid) {
+  try { const r = await S.api.viewer.getObjectProperties(modelId, [rid]); return (r && r[0]) || null; } catch { return null; }
+}
+const propId = (p) => `${p.set}|${p.name}`;
+function findProp(list, id) {
+  const [set, name] = id.split("|");
+  const lc = (x) => String(x || "").toLowerCase();
+  return list.find((p) => lc(p.set) === lc(set) && lc(p.name) === lc(name)) || list.find((p) => lc(p.name) === lc(name));
+}
+function infoFields() {
+  try { const v = JSON.parse(store.get("infoFields") || "null"); if (Array.isArray(v)) return v.slice(0, MAX_CARDS); } catch { /* ogiltigt */ }
+  const F = S.fields || {};
+  return [F.sent, F.made, F.plannedDate, F.installed].filter(Boolean).map((k) => "pmj:" + k).concat(["ifc:Tekla Assembly|Assembly/Cast unit weight"]).slice(0, MAX_CARDS);
+}
+const markId = () => store.get("infoMark") || DEFAULT_MARK;
+
+/** PMJ-värden för ett element: elementets egna, annars från någon av dess delar. */
+async function pmjValuesFor(o) {
+  if (!S.def || !$("linkTpl").value.trim()) return {};
+  if (!S.fileIds.size) { await loadFileIds(); upgradeTemplate(); }
+  const index = await loadPsetIndex(false);
+  const tpl = $("linkTpl").value.trim();
+  const own = index.get(buildLink(tpl, o.forms, o.modelId));
+  if (own) return own;
+  const kids = (S.kids.get(K(o.modelId, o.runtimeId)) || []).slice(0, 200);
+  if (!kids.length) return {};
+  const ext = await toExternalIds(o.modelId, kids);
+  for (const c of kids) { const p = ext.has(c) ? index.get(buildLink(tpl, idForms(ext.get(c)), o.modelId)) : null; if (p) return p; }
+  return {};
+}
+const effStatus = (vals) => (vals && vals[$("statusKey").value]) || statusDefault() || null;
+
+function fmtValue(kind, key, v) {
+  if (v == null || v === "" || (Array.isArray(v) && !v.length)) return { text: "–", cls: "blank" };
+  if (kind === "pmj") {
+    const p = S.props[key] || {};
+    if (/date/i.test(`${p.format || ""} ${p.type || ""}`) || parseDay(v)) {
+      const ms = parseDay(v);
+      if (ms && key === (S.fields || {}).plannedDate) return { text: `${fmtDM(ms)}${new Date(ms).getUTCFullYear()} · ${t("wkShort")} ${isoWeek(ymdOf(ms))}`, cls: "" };
+      if (ms) return { text: `✓ ${fmtDM(ms)}${new Date(ms).getUTCFullYear()}`, cls: "done" };
+    }
+    if (key === (S.fields || {}).plannedWeek) return { text: `${t("wkShort")} ${v}`, cls: "" };
+    if (Array.isArray(v)) return { text: v.join(", "), cls: "" };
+  }
+  const n = typeof v === "number" ? Math.round(v * 1000) / 1000 : v;
+  return { text: String(n), cls: "" };
+}
+
+/** Uppdatera kortet efter markeringen. Senaste anropet vinner. */
+async function refreshInfo(sel) {
+  const seq = ++S.info.seq;
+  const box = $("info");
+  try {
+    if (!S.api) return;
+    const list = (sel || (await S.api.viewer.getSelection()) || [])
+      .map((m) => ({ modelId: m.modelId, runtimeIds: m.objectRuntimeIds || m.runtimeIds || [] })).filter((m) => m.runtimeIds.length);
+    if (!list.length) { renderInfoEmpty(); return; }
+    const els = await toElements(list);
+    if (seq !== S.info.seq) return;
+    if (!els.length) { renderInfoEmpty(); return; }
+    if (els.length > 1) {
+      const counts = new Map();
+      for (const o of els.slice(0, 500)) { const st = effStatus(await pmjValuesFor(o)) || NONE; counts.set(st, (counts.get(st) || 0) + 1); }
+      if (seq !== S.info.seq) return;
+      renderInfoMulti(els.length, counts);
+      return;
+    }
+    const o = els[0];
+    const elInfo = await objectInfo(o.modelId, o.runtimeId);
+    const leaf = leavesOf(o.modelId, o.runtimeId).find((r) => r !== o.runtimeId);
+    const leafInfo = leaf != null ? await objectInfo(o.modelId, leaf) : null;
+    const props = flatProps(elInfo);
+    for (const p of flatProps(leafInfo)) if (!props.some((q) => propId(q) === propId(p))) props.push(p);
+    const vals = await pmjValuesFor(o);
+    if (seq !== S.info.seq) return;
+    S.info.model = props;
+    const product = (elInfo && elInfo.product && elInfo.product.name) || (leafInfo && leafInfo.product && leafInfo.product.name) || (elInfo && elInfo.class) || "";
+    renderInfoOne(product, props, vals);
+  } catch (e) {
+    if (seq === S.info.seq) log(`Infokort: ${e.message}`, "e");
+  } finally {
+    if (seq === S.info.seq) box.hidden = false;
+  }
+}
+
+function setStatusChip(st) {
+  const chip = $("infoStatus"), box = $("info");
+  const color = st ? colorFor(st) : null;
+  chip.hidden = !st;
+  if (st) { chip.textContent = statusName(st); chip.classList.toggle("light", /^#(a6|b8|c3|e)/i.test(color || "")); }
+  box.style.setProperty("--ic", color || "var(--line)");
+}
+function renderInfoEmpty() {
+  $("info").classList.add("blank");
+  $("infoTitle").textContent = t("infoNone");
+  $("infoMark").textContent = ""; $("infoMark").className = "imark";
+  $("infoCards").innerHTML = "";
+  setStatusChip(null);
+  if (!$("infoCfg").hidden) renderInfoCfg();
+}
+function renderInfoMulti(n, counts) {
+  $("info").classList.remove("blank");
+  $("infoTitle").textContent = t("infoMulti", n);
+  $("infoMark").textContent = ""; $("infoMark").className = "imark";
+  setStatusChip(counts.size === 1 ? [...counts.keys()][0] : null);
+  const wrap = document.createElement("div");
+  wrap.className = "imulti";
+  for (const st of sortByProcess([...counts.keys()])) {
+    const s = document.createElement("span");
+    s.style.setProperty("--c", colorFor(st) || "#d5dbe0");
+    s.innerHTML = "<i></i>";
+    s.append(`${counts.get(st)} ${statusName(st)}`);
+    wrap.appendChild(s);
+  }
+  $("infoCards").innerHTML = ""; $("infoCards").appendChild(wrap);
+}
+function renderInfoOne(product, props, vals) {
+  $("info").classList.remove("blank");
+  $("infoTitle").textContent = product || "–";
+  const mark = findProp(props, markId());
+  const mk = $("infoMark");
+  if (mark && mark.value != null && mark.value !== "") { mk.textContent = String(mark.value); mk.className = "imark"; }
+  else { mk.textContent = t("noMark"); mk.className = "imark none"; }
+  setStatusChip(effStatus(vals));
+  const box = $("infoCards");
+  box.innerHTML = "";
+  for (const id of infoFields()) {
+    let lab, f;
+    if (id.startsWith("pmj:")) {
+      const k = id.slice(4);
+      if (!S.props[k]) continue;
+      lab = fieldName(k); f = fmtValue("pmj", k, vals[k]);
+    } else {
+      const pid = id.slice(4), p = findProp(props, pid);
+      lab = pid.split("|")[1] || pid; f = fmtValue("ifc", pid, p && p.value);
+    }
+    const c = document.createElement("div");
+    c.className = "icard";
+    c.innerHTML = `<div class="l"></div><div class="v"></div>`;
+    c.querySelector(".l").textContent = lab; c.querySelector(".l").title = lab;
+    const v = c.querySelector(".v"); v.textContent = f.text; v.title = f.text; if (f.cls) v.classList.add(f.cls);
+    box.appendChild(c);
+  }
+  if (!$("infoCfg").hidden) renderInfoCfg();
+}
+
+/** ⚙: välj elementnummerfält och max 5 kort. */
+function renderInfoCfg() {
+  const model = S.info.model || [];
+  // Elementnummer
+  const selM = $("cfgMark"), cur = markId();
+  selM.innerHTML = "";
+  const ids = [...new Set([cur, DEFAULT_MARK, ...model.map(propId)])];
+  for (const id of ids) {
+    const p = findProp(model, id);
+    const [set, name] = id.split("|");
+    selM.add(new Option(`${set} › ${name}${p && p.value != null && p.value !== "" ? `  (${p.value})` : ""}`, id));
+  }
+  selM.value = cur;
+  // Kort
+  const chosen = infoFields();
+  const box = $("cfgFields");
+  box.innerHTML = "";
+  const add = (group) => { const g = document.createElement("div"); g.className = "grp"; g.textContent = group; box.appendChild(g); };
+  const opt = (id, text, preview) => {
+    const l = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = chosen.includes(id);
+    cb.disabled = !cb.checked && chosen.length >= MAX_CARDS;
+    cb.onchange = () => {
+      let next = infoFields().filter((x) => x !== id);
+      if (cb.checked) next.push(id);
+      store.set("infoFields", JSON.stringify(next.slice(0, MAX_CARDS)));
+      renderInfoCfg(); refreshInfo();
+    };
+    l.append(cb, document.createTextNode(text));
+    if (preview != null && preview !== "") { const sm = document.createElement("small"); sm.textContent = String(preview); l.appendChild(sm); }
+    box.appendChild(l);
+  };
+  add("PMJ");
+  for (const k of Object.keys(S.props)) if (k !== $("statusKey").value) opt("pmj:" + k, fieldName(k));
+  add(t("modelGroup"));
+  const modelIds = [...new Set([...chosen.filter((x) => x.startsWith("ifc:")).map((x) => x.slice(4)), ...model.map(propId)])];
+  if (!modelIds.length) { const h = document.createElement("div"); h.className = "hint"; h.textContent = t("cfgPick"); box.appendChild(h); }
+  for (const pid of modelIds) { const p = findProp(model, pid); const [set, name] = pid.split("|"); opt("ifc:" + pid, `${name}`, p ? p.value : set); }
+}
+
+/** Markeringen följs även om viewern inte skickar händelser. */
+async function pollSelection() {
+  if (!S.api || document.hidden) return;
+  try {
+    const sel = await S.api.viewer.getSelection();
+    const sig = selSignature(sel);
+    if (sig === S.info.sig) return;
+    S.info.sig = sig;
+    setSelCount((sel || []).reduce((a, m) => a + ((m.objectRuntimeIds || []).length), 0));
+    refreshInfo(sel);
+  } catch { /* tyst */ }
+}
+
 // ---------- Automatisk upptäckt ----------
 const PER_PROJECT = new Set(["libId", "defId", "region"]);
 const skey = (k) => (PER_PROJECT.has(k) && S.projectId ? `${S.projectId}.${k}` : k);
@@ -1155,6 +1382,7 @@ function applyLang() {
   $("btnSetup").title = t("settings");
   renderStatusGrid(); renderCards(); setDot();
   if (S.tl) { renderTimeline(); renderTlStats(); }
+  if (S.api) refreshInfo(); else renderInfoEmpty();
 }
 function setDot() {
   const d = $("dot");
@@ -1180,6 +1408,7 @@ function onEvent(event, data) {
   if (event === "viewer.onSelectionChanged") {
     setSelCount(Array.isArray(data) ? data.reduce((a, m) => a + ((m.objectRuntimeIds || []).length), 0) : 0);
     if (S.brush.on && Array.isArray(data)) brushTick(data);
+    if (Array.isArray(data)) { S.info.sig = selSignature(data); refreshInfo(data); }
     return;
   }
   log(`händelse: ${event}`);
@@ -1242,6 +1471,8 @@ async function init() {
     S.groups = new Map(); S.leafGroups = new Map(); S.hidden.clear(); renderCards();
   });
   $("btnWrite").onclick = guard(writeSelected);
+  $("btnInfoCfg").onclick = () => { const h = !$("infoCfg").hidden; $("infoCfg").hidden = h; if (!h) renderInfoCfg(); };
+  $("cfgMark").onchange = () => { store.set("infoMark", $("cfgMark").value); refreshInfo(); };
   $("btnClear").onclick = () => { $("log").innerHTML = ""; };
   $("btnToken").onclick = guard(requestToken);
   $("btnCopy").onclick = () => {
@@ -1266,6 +1497,7 @@ async function init() {
     { const v = store.get("region"); if (v && !S.projectId) $("region").value = v; }
     { const v = store.get("libId"); if (v) $("libId").value = v; }
     await requestToken();   // när token finns körs autoSetup()
+    setInterval(pollSelection, 1200);
   } catch (e) {
     setDot();
     log(`Kunde inte ansluta till Connect: ${e.message}. Körs sidan inuti Connects 3D-visare?`, "e");

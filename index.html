@@ -90,6 +90,32 @@
   #tlStats .card { cursor:default; }
   .switch { display:flex; align-items:center; gap:8px; margin-top:12px; font-size:12px; color:var(--muted); }
 
+  /* Infokort för markerat element */
+  .info { margin:4px 12px 10px; border:1px solid var(--line); border-radius:10px; padding:10px 12px 12px; position:relative; overflow:hidden; background:#fff; }
+  .info::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--ic, var(--line)); }
+  .ihead { display:flex; align-items:flex-start; gap:8px; }
+  .iname { flex:1; min-width:0; }
+  .ititle { font-size:15px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .imark { font-size:14px; font-weight:700; color:var(--navy); margin-top:1px; letter-spacing:.03em; }
+  .imark.none { color:var(--muted); font-weight:400; font-style:italic; }
+  .info.blank .ititle { font-size:12px; font-weight:400; color:var(--muted); }
+  .ichip { font-size:10px; font-weight:700; letter-spacing:.04em; padding:3px 8px; border-radius:10px; color:#fff; background:var(--ic, #999); white-space:nowrap; margin-top:2px; }
+  .ichip.light { color:var(--ink); }
+  .icards { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:10px; align-items:start; }
+  .icard { background:var(--soft); border-radius:7px; padding:6px 8px; min-width:0; }
+  .icard .l { font-size:9.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); line-height:1.25; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; word-break:break-word; }
+  .icard .v { font-size:13px; font-weight:700; color:var(--ink); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .icard .v.done { color:#2e7d32; }
+  .icard .v.blank { color:#b5bec6; font-weight:400; }
+  .imulti { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  .imulti span { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--soft); }
+  .imulti i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; background:var(--c); }
+  .icfg { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px; }
+  .cfglist { max-height:180px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:4px 6px; }
+  .cfglist .grp { font-size:10px; text-transform:uppercase; color:var(--muted); margin:6px 0 2px; letter-spacing:.04em; }
+  .cfglist label { display:flex; gap:6px; align-items:center; color:var(--ink); font-size:12px; margin:2px 0; }
+  .cfglist label small { color:var(--muted); margin-left:auto; padding-left:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:45%; }
+
   /* Inställningar & felsökning */
   .drawer { background:var(--soft); border-bottom:1px solid var(--line); padding:12px; }
   .drawer h3 { margin:0 0 8px; font-size:12px; color:var(--navy); }
@@ -185,6 +211,20 @@
   </div>
 </main>
 
+<section id="info" class="info">
+  <div class="ihead">
+    <div class="iname"><div id="infoTitle" class="ititle"></div><div id="infoMark" class="imark"></div></div>
+    <span id="infoStatus" class="ichip" hidden></span>
+    <button id="btnInfoCfg" class="icon" title="">⚙</button>
+  </div>
+  <div id="infoCards" class="icards"></div>
+  <div id="infoCfg" class="icfg" hidden>
+    <label for="cfgMark" data-t="cfgMark"></label>
+    <select id="cfgMark"></select>
+    <label style="margin-top:10px" data-t="cfgFields"></label>
+    <div id="cfgFields" class="cfglist"></div>
+  </div>
+</section>
 <div style="padding:0 12px 10px"><button id="btnDebug" class="icon" data-t="debug"></button></div>
 <div id="debug" class="drawer" hidden>
   <pre id="log"></pre>
