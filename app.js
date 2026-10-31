@@ -1,4 +1,4 @@
-/* PMJ 4D – v1.2
+/* PMJ 4D – v1.5
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -28,15 +28,14 @@ const T = {
     emptyView: "Klicka på Uppdatera för att färga modellen efter status.",
     cardsHint: "Klicka på en status för att dölja eller visa den.",
     selected: "objekt markerade", dateField: "Datumfält", date: "Datum",
-    live: "Spara på riktigt (annars bara provkörning)",
-    save: (n) => `Spara på ${n} objekt`, test: (n) => `Provkör på ${n} objekt`,
+    save: (n) => `Spara på ${n} objekt`,
     none: "Utan status", debug: "Felsökning", props: "Objektets egenskaper", copy: "Kopiera logg",
     clearLog: "Töm logg", token: "Ny token", needSetup: "Gör inställningarna först (⚙).",
     stOk: "Ansluten", stWait: "Väntar på åtkomst", stBad: "Ingen anslutning", settings: "Inställningar",
     autoDates: "Fyll i dagens datum automatiskt (bara om fältet är tomt)",
     weekHint: (f, w) => `${f}: ${w} (räknas ut automatiskt)`,
     autoNoteToday: "Idag – fylls bara i där fältet är tomt.", autoNoteSet: "Skrivs på alla markerade element.",
-    brush: "🖌 Penselläge – klicka på element i 3D", brushTest: "🖌 Penselläge (provkörning)",
+    brush: "🖌 Penselläge – klicka på element i 3D",
     brushOn: (n) => `🖌 Pensel på · ${n} sparade · klicka för att stänga`, pickFirst: "🖌 Välj en status först",
     tab4d: "4D", modeSite: "Montage", modeChain: "Hela kedjan", today: "Idag", play: "▶ Spela upp", pause: "❚❚ Pausa",
     wk: "Vecka", lgPlanned: "planerat", lgInstalled: "monterat", reload: "↻ Läs in på nytt",
@@ -47,6 +46,7 @@ const T = {
     infoNone: "Markera ett element i 3D för att se dess uppgifter.", infoMulti: (n) => `${n} element markerade`,
     noMark: "Inget elementnummer", cfgMark: "Elementnummer hämtas från", cfgFields: "Visa i korten (max 5)",
     modelGroup: "Modellen", cfgPick: "Markera ett element för att se modellens egenskaper.", wkShort: "v",
+    changeStatus: "Klicka för att ändra status", editDate: "Klicka för att ändra datum", saving: "Sparar…", saved: "Sparat ✓", saveFail: "Kunde inte spara – se Felsökning",
   },
   fi: {
     setupTitle: "Asetukset", libId: "Kirjaston tunnus (PMJ master library)", load: "Lataa",
@@ -57,15 +57,14 @@ const T = {
     emptyView: "Klikkaa Päivitä, niin malli väritetään tilan mukaan.",
     cardsHint: "Klikkaa tilaa piilottaaksesi tai näyttääksesi sen.",
     selected: "osaa valittu", dateField: "Päivämääräkenttä", date: "Päivämäärä",
-    live: "Tallenna oikeasti (muuten vain koeajo)",
-    save: (n) => `Tallenna ${n} osaan`, test: (n) => `Koeajo ${n} osaan`,
+    save: (n) => `Tallenna ${n} osaan`,
     none: "Ei tilaa", debug: "Vianetsintä", props: "Osan ominaisuudet", copy: "Kopioi loki",
     clearLog: "Tyhjennä loki", token: "Uusi token", needSetup: "Tee ensin asetukset (⚙).",
     stOk: "Yhdistetty", stWait: "Odottaa lupaa", stBad: "Ei yhteyttä", settings: "Asetukset",
     autoDates: "Täytä tämä päivä automaattisesti (vain jos kenttä on tyhjä)",
     weekHint: (f, w) => `${f}: ${w} (lasketaan automaattisesti)`,
     autoNoteToday: "Tänään – täytetään vain, jos kenttä on tyhjä.", autoNoteSet: "Kirjoitetaan kaikkiin valittuihin osiin.",
-    brush: "🖌 Sivellintila – klikkaa osia 3D:ssä", brushTest: "🖌 Sivellintila (koeajo)",
+    brush: "🖌 Sivellintila – klikkaa osia 3D:ssä",
     brushOn: (n) => `🖌 Sivellin päällä · ${n} tallennettu · sulje klikkaamalla`, pickFirst: "🖌 Valitse ensin tila",
     tab4d: "4D", modeSite: "Asennus", modeChain: "Koko ketju", today: "Tänään", play: "▶ Toista", pause: "❚❚ Tauko",
     wk: "Viikko", lgPlanned: "suunniteltu", lgInstalled: "asennettu", reload: "↻ Lue uudelleen",
@@ -76,9 +75,10 @@ const T = {
     infoNone: "Valitse osa 3D:ssä nähdäksesi sen tiedot.", infoMulti: (n) => `${n} elementtiä valittu`,
     noMark: "Ei elementtitunnusta", cfgMark: "Elementtitunnus haetaan kentästä", cfgFields: "Näytä korteissa (max 5)",
     modelGroup: "Malli", cfgPick: "Valitse osa nähdäksesi mallin ominaisuudet.", wkShort: "vk",
+    changeStatus: "Klikkaa vaihtaaksesi tilan", editDate: "Klikkaa muuttaaksesi päivämäärää", saving: "Tallennetaan…", saved: "Tallennettu ✓", saveFail: "Tallennus epäonnistui – katso Vianetsintä",
   },
 };
-let LANG = "sv";
+let LANG = "fi";
 const t = (k, ...a) => { const v = T[LANG][k]; return typeof v === "function" ? v(...a) : v; };
 
 // ---------- Tillstånd ----------
@@ -698,12 +698,12 @@ function renderAutoHint() {
 }
 function renderWriteButton() {
   const btn = $("btnWrite");
-  btn.textContent = $("live").checked ? t("save", S.selCount) : t("test", S.selCount);
+  btn.textContent = t("save", S.selCount);
   btn.disabled = S.brush.on || !S.selCount || (!S.pick && !(S.fields.plannedDate && $("dateVal").value));
   const br = $("btnBrush");
   br.classList.toggle("on", S.brush.on);
   br.disabled = !S.brush.on && !S.pick;
-  br.textContent = S.brush.on ? t("brushOn", S.brush.count) : !S.pick ? t("pickFirst") : $("live").checked ? t("brush") : t("brushTest");
+  br.textContent = S.brush.on ? t("brushOn", S.brush.count) : !S.pick ? t("pickFirst") : t("brush");
 }
 const FIELD_NAMES = { sent: "Piirustukset Lähetetty", made: "Valmistuspäivämäärä", installed: "Asennuspäivämäärä", plannedDate: "Suunniteltu Asennuspäivä", plannedWeek: "Suunniteltu Asennusviikko" };
 function fieldName(key) {
@@ -741,7 +741,6 @@ function propsFor(existing) {
 /** Skriv till en lista objekt. Returnerar {ok, fail}. */
 async function writeObjects(objs) {
   const libId = $("libId").value.trim(), defId = $("defId").value, tpl = $("linkTpl").value.trim();
-  const live = $("live").checked;
   if (!S.fileIds.size) await loadFileIds();
   const index = await loadPsetIndex(false);       // behövs för att se vilka datum som redan finns
   let ok = 0, fail = 0;
@@ -753,7 +752,6 @@ async function writeObjects(objs) {
       const props = propsFor(index.get(link));
       if (!Object.keys(props).length) continue;
       const path = `/psets/${encLink(link)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`;
-      if (!live) { log(`(prov) PATCH ${psetBase()}${path}  ${short({ props }, 300)}`); ok++; continue; }
       try {
         await pset("PATCH", path, { props });
         index.set(link, { ...(index.get(link) || {}), ...props });   // håll lokala kopian i takt
@@ -763,17 +761,16 @@ async function writeObjects(objs) {
     }
   }
   await Promise.all([worker(), worker(), worker(), worker()]);
-  return { ok, fail, live };
+  return { ok, fail };
 }
 
 async function writeSelected() {
   if (!setupComplete()) { openSetup(true); log(t("needSetup"), "e"); return; }
   const objs = await selectedElements();
   if (!objs.length) return;
-  log(`${$("live").checked ? "SPARAR" : "PROVKÖRNING"} på ${objs.length} element.`);
-  const { ok, fail, live } = await writeObjects(objs);
+  log(`SPARAR på ${objs.length} element.`);
+  const { ok, fail } = await writeObjects(objs);
   log(`Klart: ${ok} ok, ${fail} fel.`);
-  if (!live) { openDebug(true); return; }
   refreshInfo();
   if (S.groups.size) await colorModel();   // visa resultatet direkt
 }
@@ -833,8 +830,8 @@ async function brushTick(selFromEvent) {
   finally { B.busy = false; }
 }
 /** Uppdatera översiktens räknare lokalt efter penseldrag. */
-function moveInGroups(objs, status) {
-  if (!S.groups.size || !$("live").checked || !S.leafGroups) return;
+function moveInGroups(objs, status, force) {
+  if (!S.groups.size || !S.leafGroups) return;
   const remove = (groups, m, r) => { for (const byModel of groups.values()) { const ids = byModel.get(m); if (ids) { const i = ids.indexOf(r); if (i >= 0) ids.splice(i, 1); } } };
   for (const o of objs) {
     const m = o.modelId, el = o.runtimeId;
@@ -1143,6 +1140,7 @@ async function refreshInfo(sel) {
     const els = await toElements(list);
     if (seq !== S.info.seq) return;
     if (!els.length) { renderInfoEmpty(); return; }
+    S.info.cur = null; closeInfoMenu();
     if (els.length > 1) {
       const counts = new Map();
       for (const o of els.slice(0, 500)) { const st = effStatus(await pmjValuesFor(o)) || NONE; counts.set(st, (counts.get(st) || 0) + 1); }
@@ -1160,6 +1158,7 @@ async function refreshInfo(sel) {
     const vals = await pmjValuesFor(o);
     if (seq !== S.info.seq) return;
     S.info.model = props;
+    S.info.cur = o; S.info.vals = { ...vals }; S.info.product = product0(elInfo, leafInfo);
     flashInfo(K(o.modelId, o.runtimeId));
     const product = (elInfo && elInfo.product && elInfo.product.name) || (leafInfo && leafInfo.product && leafInfo.product.name) || (elInfo && elInfo.class) || "";
     renderInfoOne(product, props, vals);
@@ -1175,10 +1174,12 @@ function setStatusChip(st) {
   const color = st ? colorFor(st) : null;
   chip.hidden = !st;
   if (st) { chip.textContent = statusName(st); chip.classList.toggle("light", /^#(a6|b8|c3|e|00c3)/i.test(color || "")); }
+  chip.classList.toggle("can", !!S.info.cur);
+  chip.title = S.info.cur ? t("changeStatus") : "";
   box.style.setProperty("--ic", color || "var(--line)");
 }
 function renderInfoEmpty() {
-  S.info.lastKey = null;
+  S.info.lastKey = null; S.info.cur = null; closeInfoMenu();
   $("info").classList.add("blank");
   $("infoTitle").textContent = t("infoNone");
   $("infoMark").textContent = ""; $("infoMark").className = "imark";
@@ -1233,6 +1234,11 @@ function renderInfoOne(product, props, vals) {
     c.innerHTML = `<div class="l"></div><div class="v"></div>`;
     c.querySelector(".l").textContent = lab; c.querySelector(".l").title = lab;
     const v = c.querySelector(".v"); v.textContent = f.text; v.title = f.text; if (f.cls) v.classList.add(f.cls);
+    if (id.startsWith("pmj:") && S.info.cur && isDateKey(id.slice(4))) {
+      c.classList.add("edit");
+      c.title = t("editDate");
+      c.onclick = () => startDateEdit(c, id.slice(4));
+    }
     box.appendChild(c);
   }
   if (!$("infoCfg").hidden) renderInfoCfg();
@@ -1290,6 +1296,98 @@ async function pollSelection() {
     setSelCount((sel || []).reduce((a, m) => a + ((m.objectRuntimeIds || []).length), 0));
     refreshInfo(sel);
   } catch { /* tyst */ }
+}
+
+// ---------- Snabbändring i infokortet (ett element) ----------
+const product0 = (a, b) => (a && a.product && a.product.name) || (b && b.product && b.product.name) || (a && a.class) || "";
+const isDateKey = (k) => { const p = S.props[k] || {}; return /date/i.test(`${p.format || ""} ${p.type || ""}`) || Object.values(S.fields || {}).includes(k) && k !== (S.fields || {}).plannedWeek; };
+
+function closeInfoMenu() { const m = $("infoMenu"); if (m) { m.hidden = true; m.innerHTML = ""; } }
+function toggleInfoMenu() {
+  if (!S.info.cur) return;
+  const m = $("infoMenu");
+  if (!m.hidden) return closeInfoMenu();
+  const cur = effStatus(S.info.vals);
+  m.innerHTML = "";
+  for (const v of sortByProcess(statusValues())) {
+    const b = document.createElement("button");
+    b.className = v === cur ? "cur" : "";
+    b.style.setProperty("--c", colorFor(v));
+    b.innerHTML = "<i></i>";
+    b.append(statusName(v));
+    b.onclick = guard(async () => { closeInfoMenu(); if (v !== cur) await quickSave({ [$("statusKey").value]: v }, v); });
+    m.appendChild(b);
+  }
+  m.hidden = false;
+}
+
+function startDateEdit(card, key) {
+  if (card.querySelector("input")) return;
+  const v = card.querySelector(".v");
+  const old = S.info.vals[key];
+  const ms = parseDay(old);
+  const inp = document.createElement("input");
+  inp.type = "date";
+  inp.value = ms ? ymdOf(ms) : todayYmd();
+  v.replaceWith(inp);
+  inp.focus();
+  try { inp.showPicker && inp.showPicker(); } catch { /* inte alla webbläsare */ }
+  let done = false;
+  const finish = async (save) => {
+    if (done) return; done = true;
+    if (save && inp.value && inp.value !== (ms ? ymdOf(ms) : "")) {
+      const props = { [key]: formatDate(key, inp.value) };
+      if (key === (S.fields || {}).plannedDate && S.fields.plannedWeek) props[S.fields.plannedWeek] = isoWeek(inp.value);
+      await guard(() => quickSave(props, null))();
+    } else renderInfoOne(S.info.product, S.info.model, S.info.vals);
+  };
+  inp.onchange = () => finish(true);
+  inp.onkeydown = (e) => { if (e.key === "Escape") finish(false); if (e.key === "Enter") finish(true); };
+  inp.onblur = () => setTimeout(() => finish(false), 150);
+}
+
+function infoToast(text, err) {
+  const el = $("infoToast");
+  el.textContent = text; el.classList.toggle("err", !!err); el.hidden = false;
+  clearTimeout(S.info.toastT);
+  S.info.toastT = setTimeout(() => { el.hidden = true; }, err ? 4000 : 1800);
+}
+
+/** Spara direkt på det visade elementet. status = ny status (för automatiskt datum och färg), annars null. */
+async function quickSave(props, status) {
+  const o = S.info.cur;
+  if (!o) return;
+  if (!setupComplete()) { openSetup(true); infoToast(t("needSetup"), true); return; }
+  if (status) {                                   // samma regel som i Täytä: dagens datum bara om fältet är tomt
+    const auto = autoDateKey(status);
+    if (auto && !S.info.vals[auto] && !(auto in props)) props[auto] = formatDate(auto, todayYmd());
+  }
+  const libId = $("libId").value.trim(), defId = $("defId").value, tpl = $("linkTpl").value.trim();
+  if (!S.fileIds.size) await loadFileIds();
+  const link = buildLink(tpl, o.forms, o.modelId);
+  infoToast(t("saving"));
+  try {
+    await pset("PATCH", `/psets/${encLink(link)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`, { props });
+  } catch (e) { infoToast(t("saveFail"), true); throw e; }
+  const index = await loadPsetIndex(false);
+  index.set(link, { ...(index.get(link) || {}), ...props });
+  S.tlDirty = true;
+  S.info.vals = { ...S.info.vals, ...props };
+  log(`Snabbändring ${o.forms.guid}: ${short(props, 300)}`);
+  if (status) {
+    // Färga elementets delar direkt (de som elementet bestämmer över)
+    const byModel = new Map();
+    for (const leaf of leavesOf(o.modelId, o.runtimeId)) {
+      const info = S.leafInfo && S.leafInfo.get(K(o.modelId, leaf));
+      if (!info || info.owner === o.runtimeId || info.owner === leaf || info.owner === topElement(o.modelId, leaf)) addTo(byModel, o.modelId, leaf);
+    }
+    const color = colorFor(status);
+    if (color && byModel.size && S.groups.size) await S.api.viewer.setObjectState(selectorFor(byModel), { color });
+    moveInGroups([o], status, true);
+  }
+  renderInfoOne(S.info.product, S.info.model, S.info.vals);
+  flashInfo("saved:" + Date.now());
+  infoToast(t("saved"));
 }
 
 // ---------- Automatisk upptäckt ----------
@@ -1439,7 +1537,7 @@ function guard(fn) {
 }
 
 async function init() {
-  LANG = store.get("lang") || "sv";
+  LANG = store.get("lang") || "fi";
   { const v = store.get("linkTpl"); if (v) $("linkTpl").value = v; }
   $("btnLang").onclick = () => { LANG = LANG === "sv" ? "fi" : "sv"; store.set("lang", LANG); applyLang(); };
   $("btnSetup").onclick = () => openSetup($("setup").hidden);
@@ -1469,7 +1567,6 @@ async function init() {
   $("autoDate").oninput = renderAutoHint;
   $("btnBrush").onclick = guard(toggleBrush);
   $("dateVal").oninput = () => { renderAutoHint(); renderWriteButton(); };
-  $("live").onchange = () => { if (S.brush.on) stopBrush(); renderWriteButton(); };
   $("linkTpl").onchange = () => store.set("linkTpl", $("linkTpl").value.trim());
   $("region").onchange = () => store.set("region", $("region").value);
   $("btnDiscover").onclick = guard(discoverLink);
@@ -1480,6 +1577,7 @@ async function init() {
     S.groups = new Map(); S.leafGroups = new Map(); S.hidden.clear(); renderCards();
   });
   $("btnWrite").onclick = guard(writeSelected);
+  $("infoStatus").onclick = toggleInfoMenu;
   $("btnInfoCfg").onclick = () => { const h = !$("infoCfg").hidden; $("infoCfg").hidden = h; if (!h) renderInfoCfg(); };
   $("cfgMark").onchange = () => { store.set("infoMark", $("cfgMark").value); refreshInfo(); };
   $("btnClear").onclick = () => { $("log").innerHTML = ""; };

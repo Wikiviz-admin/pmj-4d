@@ -1,4 +1,4 @@
-# PMJ 4D – v1.2
+# PMJ 4D – v1.5
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -45,7 +45,7 @@ Allt sparas per projekt i webbläsaren. ⚙ öppnas bara om något inte kunde hi
 
 **Översikt:** *Uppdatera* färgar modellen efter status och visar antal per status. Klicka på ett statuskort för att dölja eller visa just de objekten.
 
-**Fyll i:** Markera objekt i 3D, klicka på en status och lägg eventuellt till ett datum. Utan bocken *Spara på riktigt* blir det en provkörning, och anropen visas under *Felsökning*. Med bocken sparas värdena och modellen färgas om. Testa gärna på en kopia av projektet först.
+**Fyll i:** Markera objekt i 3D, klicka på en status och lägg eventuellt till ett datum. Klicka sedan *Tallenna*. Värdena sparas direkt och modellen färgas om.
 
 **Datum:** När du väljer en status som har ett eget datumfält visas det fältet med dagens datum ifyllt:
 - PIIRUSTUS OK → *Piirustukset Lähetetty*
@@ -67,6 +67,10 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - Upp till 5 små kort med valfria PMJ-fält och modellegenskaper. Ifyllda datum visas med ✓ och datum, och planerat datum visas med veckonummer.
 - Markerar man flera element visas antal per status.
 - ⚙ i kortet: välj vilken modellegenskap elementnumret hämtas från (listan visar egenskaperna för det markerade elementet), och vilka kort som visas. Valen sparas i webbläsaren.
+
+**Snabbändring i kortet (ett element):** Klicka på statusmärket för att välja en ny status. Den sparas direkt, och samma automatiska datum som i Täytä fylls i om fältet är tomt. Klicka på ett PMJ-datumkort (✎) för att välja ett nytt datum. Det sparas direkt, och för planerat datum räknas veckan ut. Snabbändring sparar alltid på riktigt. Vid flera markerade element används fliken Täytä.
+
+**Språk:** finska som standard, svenska via FI/SV-knappen.
 
 **Element och delar:** Appen läser modellens struktur: behållare (projekt, byggnad, våningar), element (Teklas cast unit) och elementens delar.
 - Färg och synlighet sätts bara på delarna, alltså det man ser. Element och behållare rörs aldrig, eftersom Connect annars döljer allt under dem.

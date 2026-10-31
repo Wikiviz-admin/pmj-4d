@@ -108,6 +108,23 @@
   .ichip { font-size:10px; font-weight:700; letter-spacing:.05em; padding:3px 9px; border-radius:11px; color:#fff; background:var(--ic, #999);
            border:2px solid #fff; white-space:nowrap; margin-top:1px; box-shadow:0 1px 3px rgba(0,0,0,.2); }
   .ichip.light { color:var(--ink); }
+  .ichip { cursor:default; font-family:inherit; }
+  .ichip.can { cursor:pointer; }
+  .ichip.can::after { content:" ▾"; }
+  .ichip.can:hover { filter:brightness(1.08); transform:translateY(-1px); }
+  .imenu { display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:8px 12px 10px; background:#eef8fb; border-bottom:1px solid var(--line); }
+  .imenu button { display:flex; align-items:center; gap:6px; border:1.5px solid transparent; background:#fff; border-radius:6px; padding:6px 7px;
+                  font:600 11.5px/1.2 inherit; text-align:left; color:var(--ink); cursor:pointer; }
+  .imenu button:hover { border-color:var(--blue); }
+  .imenu button i { width:10px; height:10px; border-radius:2px; background:var(--c); flex:none; }
+  .imenu button.cur { border-color:var(--navy); background:#f4fbfd; }
+  .icard.edit { cursor:pointer; transition:background .15s; }
+  .icard.edit:hover { background:#e2f3f9; }
+  .icard.edit .l::after { content:" ✎"; opacity:.55; }
+  .icard input[type=date] { width:100%; padding:3px 4px; font-size:12px; margin-top:2px; border:1px solid var(--blue); border-radius:4px; }
+  .itoast { position:absolute; right:10px; bottom:10px; background:var(--navy); color:#fff; font-size:11px; font-weight:600; padding:4px 10px;
+            border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,.2); }
+  .itoast.err { background:#d64545; }
   /* Inget markerat: lugnt och ljust */
   .info.blank { box-shadow:0 0 0 1px var(--line); }
   .info.blank .ihead { background:var(--soft); color:var(--muted); border-bottom:0; padding:12px; }
@@ -201,7 +218,6 @@
       <div><label for="dateVal" id="plannedLabel">Suunniteltu Asennuspäivä</label><input id="dateVal" type="date"></div>
     </div>
     <div id="weekHint" class="hint" hidden></div>
-    <label class="switch"><input type="checkbox" id="live"> <span data-t="live"></span></label>
     <button id="btnWrite" class="btn full"></button>
   </div>
   <div id="pane4d" hidden>
@@ -237,10 +253,12 @@
 <div class="infowrap"><section id="info" class="info">
   <div class="ihead">
     <div class="iname"><div id="infoTitle" class="ititle"></div><div id="infoMark" class="imark"></div></div>
-    <span id="infoStatus" class="ichip" hidden></span>
+    <button id="infoStatus" class="ichip" hidden></button>
     <button id="btnInfoCfg" class="icon" title="">⚙</button>
   </div>
+  <div id="infoMenu" class="imenu" hidden></div>
   <div id="infoCards" class="icards"></div>
+  <div id="infoToast" class="itoast" hidden></div>
   <div id="infoCfg" class="icfg" hidden>
     <label for="cfgMark" data-t="cfgMark"></label>
     <select id="cfgMark"></select>
