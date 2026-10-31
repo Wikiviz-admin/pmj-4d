@@ -1,4 +1,4 @@
-# PMJ 4D – v1.1
+# PMJ 4D – v1.2
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 

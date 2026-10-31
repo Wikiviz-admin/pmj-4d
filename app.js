@@ -1,4 +1,4 @@
-/* PMJ 4D – v1.1
+/* PMJ 4D – v1.2
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -1147,6 +1147,7 @@ async function refreshInfo(sel) {
       const counts = new Map();
       for (const o of els.slice(0, 500)) { const st = effStatus(await pmjValuesFor(o)) || NONE; counts.set(st, (counts.get(st) || 0) + 1); }
       if (seq !== S.info.seq) return;
+      flashInfo("multi:" + els.map((o) => K(o.modelId, o.runtimeId)).join(","));
       renderInfoMulti(els.length, counts);
       return;
     }
@@ -1159,6 +1160,7 @@ async function refreshInfo(sel) {
     const vals = await pmjValuesFor(o);
     if (seq !== S.info.seq) return;
     S.info.model = props;
+    flashInfo(K(o.modelId, o.runtimeId));
     const product = (elInfo && elInfo.product && elInfo.product.name) || (leafInfo && leafInfo.product && leafInfo.product.name) || (elInfo && elInfo.class) || "";
     renderInfoOne(product, props, vals);
   } catch (e) {
@@ -1172,10 +1174,11 @@ function setStatusChip(st) {
   const chip = $("infoStatus"), box = $("info");
   const color = st ? colorFor(st) : null;
   chip.hidden = !st;
-  if (st) { chip.textContent = statusName(st); chip.classList.toggle("light", /^#(a6|b8|c3|e)/i.test(color || "")); }
+  if (st) { chip.textContent = statusName(st); chip.classList.toggle("light", /^#(a6|b8|c3|e|00c3)/i.test(color || "")); }
   box.style.setProperty("--ic", color || "var(--line)");
 }
 function renderInfoEmpty() {
+  S.info.lastKey = null;
   $("info").classList.add("blank");
   $("infoTitle").textContent = t("infoNone");
   $("infoMark").textContent = ""; $("infoMark").className = "imark";
@@ -1198,6 +1201,12 @@ function renderInfoMulti(n, counts) {
     wrap.appendChild(s);
   }
   $("infoCards").innerHTML = ""; $("infoCards").appendChild(wrap);
+}
+function flashInfo(key) {
+  if (key === S.info.lastKey) return;
+  S.info.lastKey = key;
+  const box = $("info");
+  box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash");
 }
 function renderInfoOne(product, props, vals) {
   $("info").classList.remove("blank");

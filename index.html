@@ -93,27 +93,37 @@
 
   /* Infokort för markerat element */
   .infowrap { position:sticky; bottom:0; margin-top:auto; background:#fff; padding:8px 12px 10px; z-index:5; flex:none; }
-  .info { border:1px solid var(--line); border-radius:10px; padding:10px 12px 12px; overflow:hidden; background:#fff; position:relative;
-          box-shadow:0 -4px 14px rgba(0,40,70,.08); }
-  .info::before { content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--ic, var(--line)); }
-  .ihead { display:flex; align-items:flex-start; gap:8px; }
+  .info { border-radius:12px; overflow:hidden; background:#fff; position:relative;
+          box-shadow:0 -6px 18px rgba(0,40,70,.14), 0 0 0 1px rgba(0,99,147,.22); transition:box-shadow .3s; }
+  .info.flash { animation:infoflash .9s ease-out; }
+  @keyframes infoflash { 0% { box-shadow:0 0 0 4px var(--cyan), 0 -6px 18px rgba(0,40,70,.14); } 100% { box-shadow:0 -6px 18px rgba(0,40,70,.14), 0 0 0 1px rgba(0,99,147,.22); } }
+  .ihead { display:flex; align-items:flex-start; gap:8px; padding:11px 12px 10px; color:#fff;
+           background:linear-gradient(115deg, var(--navy) 0%, #0079ad 70%, var(--blue) 100%); border-bottom:4px solid var(--ic, var(--cyan)); }
   .iname { flex:1; min-width:0; }
-  .ititle { font-size:15px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .imark { font-size:14px; font-weight:700; color:var(--navy); margin-top:1px; letter-spacing:.03em; }
-  .imark.none { color:var(--muted); font-weight:400; font-style:italic; }
-  .info.blank .ititle { font-size:12px; font-weight:400; color:var(--muted); }
-  .ichip { font-size:10px; font-weight:700; letter-spacing:.04em; padding:3px 8px; border-radius:10px; color:#fff; background:var(--ic, #999); white-space:nowrap; margin-top:2px; }
+  .ititle { font-size:15px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; letter-spacing:.01em; }
+  .imark { font-size:15px; font-weight:700; color:#8ee8f5; margin-top:2px; letter-spacing:.05em; }
+  .imark.none { color:rgba(255,255,255,.6); font-weight:400; font-style:italic; font-size:12px; letter-spacing:0; }
+  .ihead .icon { color:rgba(255,255,255,.75); }
+  .ihead .icon:hover { background:rgba(255,255,255,.15); color:#fff; }
+  .ichip { font-size:10px; font-weight:700; letter-spacing:.05em; padding:3px 9px; border-radius:11px; color:#fff; background:var(--ic, #999);
+           border:2px solid #fff; white-space:nowrap; margin-top:1px; box-shadow:0 1px 3px rgba(0,0,0,.2); }
   .ichip.light { color:var(--ink); }
-  .icards { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:10px; align-items:start; }
+  /* Inget markerat: lugnt och ljust */
+  .info.blank { box-shadow:0 0 0 1px var(--line); }
+  .info.blank .ihead { background:var(--soft); color:var(--muted); border-bottom:0; padding:12px; }
+  .info.blank .ititle { font-size:12px; font-weight:400; color:var(--muted); white-space:normal; }
+  .info.blank .ihead .icon { color:var(--muted); }
+  .icards { display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:10px 12px 12px; align-items:start; }
+  .icards:empty { display:none; }
   .icard { background:var(--soft); border-radius:7px; padding:6px 8px; min-width:0; }
   .icard .l { font-size:9.5px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); line-height:1.25; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; word-break:break-word; }
   .icard .v { font-size:13px; font-weight:700; color:var(--ink); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .icard .v.done { color:#2e7d32; }
   .icard .v.blank { color:#b5bec6; font-weight:400; }
-  .imulti { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  .imulti { display:flex; flex-wrap:wrap; gap:5px; grid-column:1 / -1; }
   .imulti span { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--soft); }
   .imulti i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; background:var(--c); }
-  .icfg { margin-top:10px; border-top:1px dashed var(--line); padding-top:10px; }
+  .icfg { margin:0 12px 12px; border-top:1px dashed var(--line); padding-top:10px; }
   .cfglist { max-height:180px; overflow:auto; border:1px solid var(--line); border-radius:6px; padding:4px 6px; }
   .cfglist .grp { font-size:10px; text-transform:uppercase; color:var(--muted); margin:6px 0 2px; letter-spacing:.04em; }
   .cfglist label { display:flex; gap:6px; align-items:center; color:var(--ink); font-size:12px; margin:2px 0; }
