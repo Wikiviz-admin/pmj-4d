@@ -1,4 +1,4 @@
-# PMJ 4D – v1.5
+# PMJ 4D – v1.6
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -69,6 +69,14 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - ⚙ i kortet: välj vilken modellegenskap elementnumret hämtas från (listan visar egenskaperna för det markerade elementet), och vilka kort som visas. Valen sparas i webbläsaren.
 
 **Snabbändring i kortet (ett element):** Klicka på statusmärket för att välja en ny status. Den sparas direkt, och samma automatiska datum som i Täytä fylls i om fältet är tomt. Klicka på ett PMJ-datumkort (✎) för att välja ett nytt datum. Det sparas direkt, och för planerat datum räknas veckan ut. Snabbändring sparar alltid på riktigt. Vid flera markerade element används fliken Täytä.
+
+**Sparning:** Trimbles PATCH ersätter alla värden i ett property set. Appen hämtar därför först elementets aktuella värden, slår ihop dem med ändringen och sparar allt. Inga andra fält raderas.
+
+**Datum flyttar status framåt:** *Piirustukset Lähetetty* ger PIIRUSTUS OK, *Valmistuspäivämäärä* ger VALMISTETTU och *Asennuspäivämäärä* ger ASENNETTU. Status flyttas bara framåt, och HOLD rörs aldrig av ett datum.
+
+**Inloggning:** Connects token går ut efter ungefär en timme. Appen förnyar den automatiskt, och vid fel 401 hämtas en ny token och anropet görs om. När modellen nollställs ("Nollaa malli") läser appen in strukturen på nytt.
+
+**Länkar:** Connect lagrar GUID URL-kodat i länken (`$` → `%24`), och appen gör likadant. Värden som en äldre appversion sparat med `$` läses ändå, och flyttas till Connects länk vid nästa sparning.
 
 **Språk:** finska som standard, svenska via FI/SV-knappen.
 

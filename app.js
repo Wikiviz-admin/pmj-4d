@@ -1,4 +1,4 @@
-/* PMJ 4D – v1.5
+/* PMJ 4D – v1.6
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
@@ -142,7 +142,8 @@ function idForms(externalId) {
   return g ? { guid: g, uuid: ifcToUuid(g) } : { guid: id, uuid: id };
 }
 S.fileIds = new Map();   // viewerns modelId (= versionId) -> filens id (oförändrat mellan versioner)
-const buildLink = (tpl, f, modelId) => tpl.replaceAll("{guid}", f.guid).replaceAll("{uuid}", f.uuid)
+S.encGuid = true;        // Connect lagrar GUID URL-kodat i länken ($ → %24)
+const buildLink = (tpl, f, modelId) => tpl.replaceAll("{guid}", S.encGuid ? encodeURIComponent(f.guid) : f.guid).replaceAll("{uuid}", f.uuid)
   .replaceAll("{fileId}", S.fileIds.get(modelId) || modelId).replaceAll("{modelId}", modelId);
 
 /** Hämta fil-ID för laddade modeller. */
@@ -177,7 +178,7 @@ function upgradeTemplate() {
 const psetBase = () => $("region").value.replace(/\/$/, "");
 const encLink = (link) => encodeURIComponent(link).replace(/%3A/gi, ":");
 
-async function pset(method, pathOrUrl, body) {
+async function pset(method, pathOrUrl, body, opts = {}) {
   if (!S.token) throw new Error("Ingen access token ännu – godkänn åtkomsten i Connect.");
   const url = /^https?:/.test(pathOrUrl) ? pathOrUrl : psetBase() + pathOrUrl;
   const init = { method, headers: { Authorization: `Bearer ${S.token}`, Accept: "application/json" } };
@@ -187,10 +188,42 @@ async function pset(method, pathOrUrl, body) {
   try { res = await fetch(url, init); } catch (e) { throw new Error(`Nätverks-/CORS-fel mot ${url}: ${e.message}`); }
   const text = await res.text();
   let data = text; try { data = text ? JSON.parse(text) : null; } catch { /* ej JSON */ }
+  if (res.status === 401 && !opts.retried) {            // token har gått ut → hämta ny och försök en gång till
+    log("← 401 – hämtar ny access token och försöker igen.", "r");
+    if (await refreshToken()) return pset(method, pathOrUrl, body, { ...opts, retried: true });
+  }
+  if (res.status === 404 && opts.allow404) { log("← 404 (finns inte ännu)", "r"); return null; }
   log(`← ${res.status} ${short(data, 1200)}`, res.ok ? "r" : "e");
   if (!res.ok) throw new Error(`HTTP ${res.status} från PSet API`);
   return data;
 }
+/** Be Connect om en färsk token (Connect ger den direkt när användaren redan godkänt). */
+async function refreshToken() {
+  try {
+    const r = await S.api.extension.requestPermission("accesstoken");
+    if (r && r !== "pending" && r !== "denied") { S.token = r; setDot(); return true; }
+  } catch (e) { log(`Tokenförnyelse misslyckades: ${e.message}`, "e"); }
+  return false;
+}
+
+/** Spara på ett element utan att radera dess övriga fält.
+ *  Trimbles PATCH ersätter alla värden, så aktuella värden hämtas och slås ihop först. */
+async function upsertPset(link, newProps) {
+  const libId = $("libId").value.trim(), defId = $("defId").value;
+  const path = `/psets/${encLink(link)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`;
+  const fresh = await pset("GET", path, undefined, { allow404: true });
+  const index = S.psetIndex;
+  const current = (fresh && fresh.props) || (index && index.get(link)) || {};
+  const merged = { ...current, ...newProps };
+  const res = await pset("PATCH", path, { props: merged });
+  const saved = (res && res.props) || merged;
+  const lost = Object.keys(merged).filter((k) => !(k in saved));
+  if (lost.length) log(`Varning: Trimble sparade inte alla fält (${lost.join(", ")}).`, "e");
+  if (index) index.set(link, saved);
+  S.tlDirty = true;
+  return saved;
+}
+
 const itemsOf = (d) => Array.isArray(d) ? d : (d && (d.items || d.psets || d.defs || d.data || d.values)) || [];
 
 async function psetAll(path) {
@@ -275,8 +308,8 @@ function detectFields(keys) {
     sent: find(/^piirustu(kset|s)lahetetty/),
     made: find(/^valmistuspaivamaara/),
     installed: find(/^asennuspaivamaara/),
-    plannedDate: find(/^suunniteltuasennuspaiva/),
-    plannedWeek: find(/^suunniteltuasennusviikko/),
+    plannedDate: find(/^su+n+it+el+tuasennuspaiva/),
+    plannedWeek: find(/^su+n+it+el+tuasennusviikko/),
   };
   const isDate = (k) => /date/i.test(`${S.props[k].format || ""} ${S.props[k].type || ""}`);
   const isNum = (k) => /number|integer/i.test(S.props[k].type || "");
@@ -421,6 +454,13 @@ async function loadPsetIndex(force) {
   const list = await psetAll(`/libs/${encodeURIComponent(libId)}/defs/${encodeURIComponent(defId)}/psets`);
   S.psetIndex = new Map();
   for (const p of list) if (p && p.link) S.psetIndex.set(p.link, p.props || {});
+  // Connects länkar har "$" som "%24". Äldre appversioner skrev "$" – läs dem via den riktiga länken.
+  const enc = [...S.psetIndex.keys()].some((l) => l.includes("%24"));
+  const raw = [...S.psetIndex.keys()].filter((l) => l.includes("$"));
+  S.encGuid = enc || !raw.length;
+  let orphans = 0;
+  for (const l of raw) { const canon = l.replace(/\$/g, "%24"); if (!S.psetIndex.has(canon)) { S.psetIndex.set(canon, S.psetIndex.get(l)); orphans++; } }
+  if (raw.length) log(`${raw.length} värden sparade med "$" i länken av en äldre appversion${orphans ? ` (${orphans} flyttas till Connects länk vid nästa sparning)` : ""}.`);
   log(`${S.psetIndex.size} objekt har property setet ifyllt.`);
   if (list[0]) log({ exempel_på_pset: list[0] });
   return S.psetIndex;
@@ -435,6 +475,7 @@ async function discoverLink() {
     for (const link of index.keys()) {
       let tpl = null;
       if (link.includes(guid)) tpl = link.replace(guid, "{guid}");
+      else if (link.includes(encodeURIComponent(guid))) tpl = link.replace(encodeURIComponent(guid), "{guid}");
       else if (link.toLowerCase().includes(uuid.toLowerCase())) tpl = link.replace(new RegExp(uuid, "i"), "{uuid}");
       else if (link.toLowerCase().includes(uuid.replace(/-/g, "").toLowerCase())) { log("Länken använder UUID utan bindestreck – behöver stöd i koden.", "e"); continue; }
       if (!tpl) continue;
@@ -471,10 +512,14 @@ S.structDone = new Set();  // modelId som är inlästa
 const K = (m, r) => m + ":" + r;
 const addTo = (map, modelId, rid) => { if (!map.has(modelId)) map.set(modelId, []); map.get(modelId).push(rid); };
 
+/** Ett viewer-anrop som inte svarar får aldrig låsa appen. */
+function withTimeout(promise, ms = 20000) {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error("viewer svarade inte i tid")), ms))]);
+}
 async function hierParents(modelId, ids, type) {
   const out = [];
   for (let i = 0; i < ids.length; i += 5000) {
-    try { out.push(...((await S.api.viewer.getHierarchyParents(modelId, ids.slice(i, i + 5000), type, false, false)) || [])); }
+    try { out.push(...((await withTimeout(S.api.viewer.getHierarchyParents(modelId, ids.slice(i, i + 5000), type, false, false))) || [])); }
     catch { /* typen finns inte i modellen */ }
   }
   return out.map((p) => p.id);
@@ -488,7 +533,7 @@ async function loadChildren(modelId, elementIds) {
       const r = queue.shift();
       let ch = [];
       for (const type of [ELEMENT_ASSEMBLY, 1, 3]) {
-        try { ch = ((await S.api.viewer.getHierarchyChildren(modelId, [r], type, true)) || []).map((c) => c.id).filter((id) => id !== r); }
+        try { ch = ((await withTimeout(S.api.viewer.getHierarchyChildren(modelId, [r], type, true))) || []).map((c) => c.id).filter((id) => id !== r); }
         catch { ch = []; }
         if (ch.length) break;
       }
@@ -524,7 +569,7 @@ async function loadStructure(models, statusKeys) {
       S.probed.add(modelId);
       const cand = rids.filter((r) => statusKeys.has(K(modelId, r)) && !S.kids.has(K(modelId, r)) && !S.containers.has(K(modelId, r)) && !S.partOf.has(K(modelId, r)));
       let probe = [];
-      if (cand.length) { try { probe = (await S.api.viewer.getHierarchyChildren(modelId, cand.slice(0, 2000), ELEMENT_ASSEMBLY, true)) || []; } catch { probe = []; } }
+      if (cand.length) { try { probe = (await withTimeout(S.api.viewer.getHierarchyChildren(modelId, cand.slice(0, 2000), ELEMENT_ASSEMBLY, true))) || []; } catch { probe = []; } }
       if (probe.length) { await loadChildren(modelId, cand); changed = true; }
     }
     // Behållare som ändå har en sparad status (status satt på fel nivå) behandlas som element
@@ -751,13 +796,8 @@ async function writeObjects(objs) {
       const link = buildLink(tpl, o.forms, o.modelId);
       const props = propsFor(index.get(link));
       if (!Object.keys(props).length) continue;
-      const path = `/psets/${encLink(link)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`;
-      try {
-        await pset("PATCH", path, { props });
-        index.set(link, { ...(index.get(link) || {}), ...props });   // håll lokala kopian i takt
-        S.tlDirty = true;
-        ok++;
-      } catch (e) { fail++; log(`Fel för ${o.forms.guid}: ${e.message}`, "e"); }
+      try { await upsertPset(link, props); ok++; }
+      catch (e) { fail++; log(`Fel för ${o.forms.guid}: ${e.message}`, "e"); }
     }
   }
   await Promise.all([worker(), worker(), worker(), worker()]);
@@ -1353,11 +1393,32 @@ function infoToast(text, err) {
   S.info.toastT = setTimeout(() => { el.hidden = true; }, err ? 4000 : 1800);
 }
 
+const STATUS_FOR_DATE = { sent: "PIIRUSTUS OK", made: "VALMISTETTU", installed: "ASENNETTU" };
+const STATUS_RANK = { "ODOTTAA": 0, "SUUNNITELTU": 1, "PIIRUSTUS OK": 2, "TUOTANNOSSA": 3, "VALMISTETTU": 4, "ASENNETTU": 5 };
+/** Ny status när datum fylls i: bara framåt, och HOLD rörs aldrig. Returnerar null om inget ändras. */
+function statusFromDates(current, props) {
+  const cur = String(current || statusDefault() || "").toUpperCase();
+  if (cur === "HOLD") return null;
+  let best = null;
+  for (const [role, st] of Object.entries(STATUS_FOR_DATE)) {
+    const key = (S.fields || {})[role];
+    if (!key || !props[key]) continue;
+    if (!best || STATUS_RANK[st] > STATUS_RANK[best]) best = st;
+  }
+  if (!best || !statusValues().includes(best)) return null;
+  const curRank = cur in STATUS_RANK ? STATUS_RANK[cur] : -1;
+  return STATUS_RANK[best] > curRank ? best : null;
+}
+
 /** Spara direkt på det visade elementet. status = ny status (för automatiskt datum och färg), annars null. */
 async function quickSave(props, status) {
   const o = S.info.cur;
   if (!o) return;
   if (!setupComplete()) { openSetup(true); infoToast(t("needSetup"), true); return; }
+  if (!status) {                                  // datum ifyllt → flytta status framåt (ej från HOLD)
+    const next = statusFromDates(effStatus(S.info.vals), props);
+    if (next) { props[$("statusKey").value] = next; status = next; }
+  }
   if (status) {                                   // samma regel som i Täytä: dagens datum bara om fältet är tomt
     const auto = autoDateKey(status);
     if (auto && !S.info.vals[auto] && !(auto in props)) props[auto] = formatDate(auto, todayYmd());
@@ -1366,13 +1427,11 @@ async function quickSave(props, status) {
   if (!S.fileIds.size) await loadFileIds();
   const link = buildLink(tpl, o.forms, o.modelId);
   infoToast(t("saving"));
-  try {
-    await pset("PATCH", `/psets/${encLink(link)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`, { props });
-  } catch (e) { infoToast(t("saveFail"), true); throw e; }
-  const index = await loadPsetIndex(false);
-  index.set(link, { ...(index.get(link) || {}), ...props });
-  S.tlDirty = true;
-  S.info.vals = { ...S.info.vals, ...props };
+  await loadPsetIndex(false);
+  let saved;
+  try { saved = await upsertPset(link, props); }
+  catch (e) { infoToast(t("saveFail"), true); throw e; }
+  S.info.vals = { ...S.info.vals, ...saved };
   log(`Snabbändring ${o.forms.guid}: ${short(props, 300)}`);
   if (status) {
     // Färga elementets delar direkt (de som elementet bestämmer över)
@@ -1456,9 +1515,10 @@ async function autoLinkTemplate() {
   for (const link of index.keys()) {
     if (++n > 5000) break;
     for (const piece of link.split(/[:/|#?&=,;]+/)) {
+      let dec = piece; try { dec = decodeURIComponent(piece); } catch { /* lämna */ }
       let tpl = null, modelId = null;
-      if (byGuid.has(piece)) { tpl = link.replace(piece, "{guid}"); modelId = byGuid.get(piece); }
-      else if (byUuid.has(piece.toLowerCase())) { tpl = link.replace(piece, "{uuid}"); modelId = byUuid.get(piece.toLowerCase()); }
+      if (byGuid.has(dec)) { tpl = link.replace(piece, "{guid}"); modelId = byGuid.get(dec); }
+      else if (byUuid.has(dec.toLowerCase())) { tpl = link.replace(piece, "{uuid}"); modelId = byUuid.get(dec.toLowerCase()); }
       if (!tpl) continue;
       await loadFileIds();
       tpl = generalizeTemplate(tpl, modelId);
@@ -1507,6 +1567,7 @@ function showTab(which) {
   if (which === "d4" && S.api) guard(() => open4d(false))();
 }
 
+const QUIET_EVENTS = /onCameraChanged|onPresentationChanged|onSectionBoxChanged|onSectionPlaneChanged|onSettingsChanged|onPicked/;
 function onEvent(event, data) {
   if (event === "extension.accessToken") {
     if (data && data !== "pending" && data !== "denied") { const first = !S.token; S.token = data; if (first) afterToken(); }
@@ -1518,8 +1579,21 @@ function onEvent(event, data) {
     if (Array.isArray(data)) { S.info.sig = selSignature(data); refreshInfo(data); }
     return;
   }
-  log(`händelse: ${event}`);
+  if (event === "viewer.onPicked") { setTimeout(pollSelection, 60); if (S.brush.on) setTimeout(() => brushTick(), 80); return; }
+  if (event === "viewer.onModelReset" || event === "viewer.onModelStateChanged") { resetModelCache(event); return; }
+  if (!QUIET_EVENTS.test(event)) log(`händelse: ${event}`);
 }
+/** Modellen har laddats om/nollställts: glöm struktur och färgläge, läs in på nytt vid behov. */
+function resetModelCache(reason) {
+  S.structDone.clear(); S.kids.clear(); S.partOf.clear(); S.asm.clear(); S.containers.clear();
+  S.probed = null; S.fileIds.clear(); S.structLock = null;
+  S.groups = new Map(); S.leafGroups = new Map(); S.leafInfo = new Map(); S.hidden.clear();
+  if (S.tl) S.tl.painted = false;
+  S.tlDirty = true;
+  renderCards();
+  log(`Modellen ändrades (${reason.replace("viewer.", "")}) – appen läser in strukturen på nytt vid nästa uppdatering.`);
+}
+
 async function afterToken() { await autoSetup(); }
 async function requestToken() {
   const r = await S.api.extension.requestPermission("accesstoken");
@@ -1605,6 +1679,7 @@ async function init() {
     { const v = store.get("libId"); if (v) $("libId").value = v; }
     await requestToken();   // när token finns körs autoSetup()
     setInterval(pollSelection, 1200);
+    setInterval(refreshToken, 30 * 60 * 1000);   // förnya i god tid innan token går ut
   } catch (e) {
     setDot();
     log(`Kunde inte ansluta till Connect: ${e.message}. Körs sidan inuti Connects 3D-visare?`, "e");
