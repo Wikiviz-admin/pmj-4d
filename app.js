@@ -1,9 +1,10 @@
-/* PMJ 4D – v1.6
+/* PMJ 4D – v1.7
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
  */
 "use strict";
+const APP_VERSION = "1.7";
 
 // ---------- Statusfärger: PMJ-blått i processordning ----------
 const STATUS_COLORS = {
@@ -213,7 +214,7 @@ async function upsertPset(link, newProps) {
   const path = `/psets/${encLink(link)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`;
   const fresh = await pset("GET", path, undefined, { allow404: true });
   const index = S.psetIndex;
-  const current = (fresh && fresh.props) || (index && index.get(link)) || {};
+  const current = { ...((index && index.get(link)) || {}), ...((fresh && fresh.props) || {}) };
   const merged = { ...current, ...newProps };
   const res = await pset("PATCH", path, { props: merged });
   const saved = (res && res.props) || merged;
@@ -1663,6 +1664,8 @@ async function init() {
       .then(() => log("Loggen kopierad."));
   };
   applyLang();
+  $("ver").textContent = "v" + APP_VERSION;
+  log(`PMJ 4D v${APP_VERSION} startad.`);
 
   if (!window.TrimbleConnectWorkspace) { log("Workspace API-skriptet kunde inte laddas.", "e"); return; }
   try {

@@ -1,4 +1,4 @@
-# PMJ 4D – v1.6
+# PMJ 4D – v1.7
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -87,6 +87,8 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - Appen sparar alltid på elementet, även om man markerat en del. Status som tidigare sparats på delnivå visas fortfarande, och Felsökning varnar för den.
 
 **Standardvärde:** Element som aldrig fått ett sparat värde räknas som bibliotekets standardvärde (ODOTTAA), precis som Connect visar dem. Länkmallen är modelloberoende (`{fileId}`), så flera IFC-filer och nya modellversioner fungerar.
+
+**Version:** Versionsnumret syns längst ner till höger i panelen, bredvid *Vianetsintä*. Efter en uppladdning till GitHub kan det ta upp till 10 minuter innan den nya versionen syns. Tryck Ctrl+F5 och kontrollera numret.
 
 Om något går fel: öppna *Felsökning*, klicka *Kopiera logg* och klistra in loggen till Claude.
 
