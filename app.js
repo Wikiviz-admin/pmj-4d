@@ -1,10 +1,10 @@
-/* PMJ 4D – v1.7
+/* PMJ 4D – v1.8
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
  */
 "use strict";
-const APP_VERSION = "1.7";
+const APP_VERSION = "1.8";
 
 // ---------- Statusfärger: PMJ-blått i processordning ----------
 const STATUS_COLORS = {
@@ -47,7 +47,7 @@ const T = {
     infoNone: "Markera ett element i 3D för att se dess uppgifter.", infoMulti: (n) => `${n} element markerade`,
     noMark: "Inget elementnummer", cfgMark: "Elementnummer hämtas från", cfgFields: "Visa i korten (max 5)",
     modelGroup: "Modellen", cfgPick: "Markera ett element för att se modellens egenskaper.", wkShort: "v",
-    changeStatus: "Klicka för att ändra status", editDate: "Klicka för att ändra datum", saving: "Sparar…", saved: "Sparat ✓", saveFail: "Kunde inte spara – se Felsökning",
+    changeStatus: "Klicka för att ändra status", editDate: "Klicka för att ändra datum", saving: "Sparar…", saved: "Sparat ✓", cleared: "Tömt ✓", clear1: "Töm", saveFail: "Kunde inte spara – se Felsökning",
   },
   fi: {
     setupTitle: "Asetukset", libId: "Kirjaston tunnus (PMJ master library)", load: "Lataa",
@@ -76,7 +76,7 @@ const T = {
     infoNone: "Valitse osa 3D:ssä nähdäksesi sen tiedot.", infoMulti: (n) => `${n} elementtiä valittu`,
     noMark: "Ei elementtitunnusta", cfgMark: "Elementtitunnus haetaan kentästä", cfgFields: "Näytä korteissa (max 5)",
     modelGroup: "Malli", cfgPick: "Valitse osa nähdäksesi mallin ominaisuudet.", wkShort: "vk",
-    changeStatus: "Klikkaa vaihtaaksesi tilan", editDate: "Klikkaa muuttaaksesi päivämäärää", saving: "Tallennetaan…", saved: "Tallennettu ✓", saveFail: "Tallennus epäonnistui – katso Vianetsintä",
+    changeStatus: "Klikkaa vaihtaaksesi tilan", editDate: "Klikkaa muuttaaksesi päivämäärää", saving: "Tallennetaan…", saved: "Tallennettu ✓", cleared: "Tyhjennetty ✓", clear1: "Tyhjennä", saveFail: "Tallennus epäonnistui – katso Vianetsintä",
   },
 };
 let LANG = "fi";
@@ -205,6 +205,27 @@ async function refreshToken() {
     if (r && r !== "pending" && r !== "denied") { S.token = r; setDot(); return true; }
   } catch (e) { log(`Tokenförnyelse misslyckades: ${e.message}`, "e"); }
   return false;
+}
+
+/** Ta bort fält från ett element: spara alla övriga värden utan dem. */
+async function removePsetKeys(link, keys) {
+  const libId = $("libId").value.trim(), defId = $("defId").value;
+  const path = `/psets/${encLink(link)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}`;
+  const fresh = await pset("GET", path, undefined, { allow404: true });
+  const index = S.psetIndex;
+  const merged = { ...((index && index.get(link)) || {}), ...((fresh && fresh.props) || {}) };
+  for (const k of keys) delete merged[k];
+  let res = await pset("PATCH", path, { props: merged });
+  let saved = (res && res.props) || merged;
+  if (keys.some((k) => k in saved && saved[k] != null)) {          // om Trimble ändå slår ihop: försök med null
+    const withNull = { ...merged }; for (const k of keys) withNull[k] = null;
+    res = await pset("PATCH", path, { props: withNull });
+    saved = (res && res.props) || withNull;
+  }
+  const clean = Object.fromEntries(Object.entries(saved).filter(([, v]) => v != null && v !== ""));
+  if (index) index.set(link, clean);
+  S.tlDirty = true;
+  return clean;
 }
 
 /** Spara på ett element utan att radera dess övriga fält.
@@ -1278,7 +1299,7 @@ function renderInfoOne(product, props, vals) {
     if (id.startsWith("pmj:") && S.info.cur && isDateKey(id.slice(4))) {
       c.classList.add("edit");
       c.title = t("editDate");
-      c.onclick = () => startDateEdit(c, id.slice(4));
+      c.onclick = (e) => { if (e.target.closest(".iclear")) return; startDateEdit(c, id.slice(4)); };
     }
     box.appendChild(c);
   }
@@ -1367,15 +1388,24 @@ function startDateEdit(card, key) {
   const v = card.querySelector(".v");
   const old = S.info.vals[key];
   const ms = parseDay(old);
+  let done = false;
   const inp = document.createElement("input");
   inp.type = "date";
   inp.value = ms ? ymdOf(ms) : todayYmd();
   v.replaceWith(inp);
+  if (old) {
+    const clr = document.createElement("button");
+    clr.className = "iclear";
+    clr.textContent = "✕ " + t("clear1");
+    clr.onpointerdown = (e) => e.preventDefault();        // låt inte datumfältet tappa fokus först
+    clr.onclick = (e) => { e.stopPropagation(); done = true; guard(() => quickClear(key))(); };
+    inp.after(clr);
+  }
   inp.focus();
   try { inp.showPicker && inp.showPicker(); } catch { /* inte alla webbläsare */ }
-  let done = false;
   const finish = async (save) => {
     if (done) return; done = true;
+    if (save && !inp.value && ms) { await guard(() => quickClear(key))(); return; }   // kalenderns "Clear"
     if (save && inp.value && inp.value !== (ms ? ymdOf(ms) : "")) {
       const props = { [key]: formatDate(key, inp.value) };
       if (key === (S.fields || {}).plannedDate && S.fields.plannedWeek) props[S.fields.plannedWeek] = isoWeek(inp.value);
@@ -1385,6 +1415,24 @@ function startDateEdit(card, key) {
   inp.onchange = () => finish(true);
   inp.onkeydown = (e) => { if (e.key === "Escape") finish(false); if (e.key === "Enter") finish(true); };
   inp.onblur = () => setTimeout(() => finish(false), 150);
+}
+
+async function quickClear(key) {
+  const o = S.info.cur;
+  if (!o) return;
+  const keys = [key];
+  if (key === (S.fields || {}).plannedDate && S.fields.plannedWeek) keys.push(S.fields.plannedWeek);
+  if (!S.fileIds.size) await loadFileIds();
+  const link = buildLink($("linkTpl").value.trim(), o.forms, o.modelId);
+  await loadPsetIndex(false);
+  infoToast(t("saving"));
+  let saved;
+  try { saved = await removePsetKeys(link, keys); }
+  catch (e) { infoToast(t("saveFail"), true); throw e; }
+  S.info.vals = { ...saved };
+  log(`Tömde ${keys.map((k) => fieldName(k)).join(", ")} på ${o.forms.guid}.`);
+  renderInfoOne(S.info.product, S.info.model, S.info.vals);
+  infoToast(t("cleared"));
 }
 
 function infoToast(text, err) {
