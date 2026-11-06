@@ -124,6 +124,12 @@
   .icard input[type=date] { width:100%; padding:3px 4px; font-size:12px; margin-top:2px; border:1px solid var(--blue); border-radius:4px; }
   .iclear { display:block; margin-top:5px; background:none; border:0; padding:2px 0; color:#d64545; font:600 11px inherit; cursor:pointer; }
   .iclear:hover { text-decoration:underline; }
+  .imeta { padding:0 12px 10px; margin-top:-4px; font-size:11px; color:var(--muted); cursor:pointer; user-select:none; }
+  .imeta:hover { color:var(--navy); }
+  .ihist { margin:0 12px 12px; border-top:1px dashed var(--line); padding-top:8px; max-height:190px; overflow:auto; }
+  .hrow { padding:5px 0; border-bottom:1px solid var(--soft); }
+  .hrow .hw { font-size:10.5px; color:var(--muted); }
+  .hrow .hc { font-size:12px; color:var(--ink); font-weight:600; margin-top:1px; }
   .itoast { position:absolute; right:10px; bottom:10px; background:var(--navy); color:#fff; font-size:11px; font-weight:600; padding:4px 10px;
             border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,.2); }
   .itoast.err { background:#d64545; }
@@ -260,6 +266,8 @@
   </div>
   <div id="infoMenu" class="imenu" hidden></div>
   <div id="infoCards" class="icards"></div>
+  <div id="infoMeta" class="imeta" hidden></div>
+  <div id="infoHist" class="ihist" hidden></div>
   <div id="infoToast" class="itoast" hidden></div>
   <div id="infoCfg" class="icfg" hidden>
     <label for="cfgMark" data-t="cfgMark"></label>
@@ -270,6 +278,6 @@
 </section></div>
 
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
-<script src="app.js?v=1.8"></script>
+<script src="app.js?v=1.9"></script>
 </body>
 </html>

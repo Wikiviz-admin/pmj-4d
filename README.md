@@ -1,4 +1,4 @@
-# PMJ 4D – v1.8
+# PMJ 4D – v1.9
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -77,6 +77,8 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 **Inloggning:** Connects token går ut efter ungefär en timme. Appen förnyar den automatiskt, och vid fel 401 hämtas en ny token och anropet görs om. När modellen nollställs ("Nollaa malli") läser appen in strukturen på nytt.
 
 **Länkar:** Connect lagrar GUID URL-kodat i länken (`$` → `%24`), och appen gör likadant. Värden som en äldre appversion sparat med `$` läses ändå, och flyttas till Connects länk vid nästa sparning.
+
+**Vem ändrade?** Under korten står när elementets PMJ-värden senast ändrades och av vem, t.ex. *Päivitetty 6.11.2026 klo 15.05 · Niklas Wiik (sinä)*. Klicka på raden för att fälla ut historiken (Trimble sparar varje version). Varje rad visar tid, person och vad som ändrades, t.ex. *VALMISTETTU → ASENNETTU · Asennuspäivämäärä: 6.11.2026*. Namnen hämtas från projektets medlemslista.
 
 **Språk:** finska som standard, svenska via FI/SV-knappen.
 

@@ -1,10 +1,10 @@
-/* PMJ 4D – v1.8
+/* PMJ 4D – v1.9
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
  */
 "use strict";
-const APP_VERSION = "1.8";
+const APP_VERSION = "1.9";
 
 // ---------- Statusfärger: PMJ-blått i processordning ----------
 const STATUS_COLORS = {
@@ -47,7 +47,9 @@ const T = {
     infoNone: "Markera ett element i 3D för att se dess uppgifter.", infoMulti: (n) => `${n} element markerade`,
     noMark: "Inget elementnummer", cfgMark: "Elementnummer hämtas från", cfgFields: "Visa i korten (max 5)",
     modelGroup: "Modellen", cfgPick: "Markera ett element för att se modellens egenskaper.", wkShort: "v",
-    changeStatus: "Klicka för att ändra status", editDate: "Klicka för att ändra datum", saving: "Sparar…", saved: "Sparat ✓", cleared: "Tömt ✓", clear1: "Töm", saveFail: "Kunde inte spara – se Felsökning",
+    changeStatus: "Klicka för att ändra status", editDate: "Klicka för att ändra datum", saving: "Sparar…", saved: "Sparat ✓", cleared: "Tömt ✓", clear1: "Töm",
+    updated: "Uppdaterad", you: "du", histTip: "Klicka för att se historiken", histLoading: "Hämtar historik…",
+    histFail: "Kunde inte hämta historiken – se Felsökning", histEmpty: "Ingen historik ännu", saveFail: "Kunde inte spara – se Felsökning",
   },
   fi: {
     setupTitle: "Asetukset", libId: "Kirjaston tunnus (PMJ master library)", load: "Lataa",
@@ -76,7 +78,9 @@ const T = {
     infoNone: "Valitse osa 3D:ssä nähdäksesi sen tiedot.", infoMulti: (n) => `${n} elementtiä valittu`,
     noMark: "Ei elementtitunnusta", cfgMark: "Elementtitunnus haetaan kentästä", cfgFields: "Näytä korteissa (max 5)",
     modelGroup: "Malli", cfgPick: "Valitse osa nähdäksesi mallin ominaisuudet.", wkShort: "vk",
-    changeStatus: "Klikkaa vaihtaaksesi tilan", editDate: "Klikkaa muuttaaksesi päivämäärää", saving: "Tallennetaan…", saved: "Tallennettu ✓", cleared: "Tyhjennetty ✓", clear1: "Tyhjennä", saveFail: "Tallennus epäonnistui – katso Vianetsintä",
+    changeStatus: "Klikkaa vaihtaaksesi tilan", editDate: "Klikkaa muuttaaksesi päivämäärää", saving: "Tallennetaan…", saved: "Tallennettu ✓", cleared: "Tyhjennetty ✓", clear1: "Tyhjennä",
+    updated: "Päivitetty", you: "sinä", histTip: "Klikkaa nähdäksesi historian", histLoading: "Haetaan historiaa…",
+    histFail: "Historian haku epäonnistui – katso Vianetsintä", histEmpty: "Ei vielä historiaa", saveFail: "Tallennus epäonnistui – katso Vianetsintä",
   },
 };
 let LANG = "fi";
@@ -224,6 +228,7 @@ async function removePsetKeys(link, keys) {
   }
   const clean = Object.fromEntries(Object.entries(saved).filter(([, v]) => v != null && v !== ""));
   if (index) index.set(link, clean);
+  if (res && S.psetMeta) S.psetMeta.set(link, metaOf(res));
   S.tlDirty = true;
   return clean;
 }
@@ -242,6 +247,7 @@ async function upsertPset(link, newProps) {
   const lost = Object.keys(merged).filter((k) => !(k in saved));
   if (lost.length) log(`Varning: Trimble sparade inte alla fält (${lost.join(", ")}).`, "e");
   if (index) index.set(link, saved);
+  if (res && S.psetMeta) S.psetMeta.set(link, metaOf(res));
   S.tlDirty = true;
   return saved;
 }
@@ -475,7 +481,8 @@ async function loadPsetIndex(force) {
   if (!libId || !defId) throw new Error(t("needSetup"));
   const list = await psetAll(`/libs/${encodeURIComponent(libId)}/defs/${encodeURIComponent(defId)}/psets`);
   S.psetIndex = new Map();
-  for (const p of list) if (p && p.link) S.psetIndex.set(p.link, p.props || {});
+  S.psetMeta = new Map();
+  for (const p of list) if (p && p.link) { S.psetIndex.set(p.link, p.props || {}); S.psetMeta.set(p.link, metaOf(p)); }
   // Connects länkar har "$" som "%24". Äldre appversioner skrev "$" – läs dem via den riktiga länken.
   const enc = [...S.psetIndex.keys()].some((l) => l.includes("%24"));
   const raw = [...S.psetIndex.keys()].filter((l) => l.includes("$"));
@@ -1164,12 +1171,18 @@ async function pmjValuesFor(o) {
   if (!S.fileIds.size) { await loadFileIds(); upgradeTemplate(); }
   const index = await loadPsetIndex(false);
   const tpl = $("linkTpl").value.trim();
-  const own = index.get(buildLink(tpl, o.forms, o.modelId));
+  const ownLink = buildLink(tpl, o.forms, o.modelId);
+  o.srcLink = ownLink;                               // där värdena finns (för "senast uppdaterad")
+  const own = index.get(ownLink);
   if (own) return own;
   const kids = (S.kids.get(K(o.modelId, o.runtimeId)) || []).slice(0, 200);
   if (!kids.length) return {};
   const ext = await toExternalIds(o.modelId, kids);
-  for (const c of kids) { const p = ext.has(c) ? index.get(buildLink(tpl, idForms(ext.get(c)), o.modelId)) : null; if (p) return p; }
+  for (const c of kids) {
+    if (!ext.has(c)) continue;
+    const l = buildLink(tpl, idForms(ext.get(c)), o.modelId), p = index.get(l);
+    if (p) { o.srcLink = l; return p; }
+  }
   return {};
 }
 const effStatus = (vals) => (vals && vals[$("statusKey").value]) || statusDefault() || null;
@@ -1241,6 +1254,7 @@ function setStatusChip(st) {
   box.style.setProperty("--ic", color || "var(--line)");
 }
 function renderInfoEmpty() {
+  if ($("infoMeta")) { $("infoMeta").hidden = true; $("infoHist").hidden = true; }
   S.info.lastKey = null; S.info.cur = null; closeInfoMenu();
   $("info").classList.add("blank");
   $("infoTitle").textContent = t("infoNone");
@@ -1250,6 +1264,7 @@ function renderInfoEmpty() {
   if (!$("infoCfg").hidden) renderInfoCfg();
 }
 function renderInfoMulti(n, counts) {
+  if ($("infoMeta")) { $("infoMeta").hidden = true; $("infoHist").hidden = true; }
   $("info").classList.remove("blank");
   $("infoTitle").textContent = t("infoMulti", n);
   $("infoMark").textContent = ""; $("infoMark").className = "imark";
@@ -1303,6 +1318,8 @@ function renderInfoOne(product, props, vals) {
     }
     box.appendChild(c);
   }
+  renderInfoMeta();
+  if (S.info.histOpen) loadHistory();
   if (!$("infoCfg").hidden) renderInfoCfg();
 }
 
@@ -1358,6 +1375,102 @@ async function pollSelection() {
     setSelCount((sel || []).reduce((a, m) => a + ((m.objectRuntimeIds || []).length), 0));
     refreshInfo(sel);
   } catch { /* tyst */ }
+}
+
+// ---------- Vem ändrade? Senast uppdaterad + historik ----------
+S.people = new Map();       // tiduuid / id -> "Förnamn Efternamn"
+const metaOf = (p) => ({ at: p.modifiedAt || p.createdAt || null, by: p.modifiedBy || p.createdBy || null, v: p.v });
+async function loadPeople() {
+  try {
+    const members = (await S.api.project.getMembers()) || [];
+    for (const m of members) {
+      const name = [m.firstName, m.lastName].filter(Boolean).join(" ") || m.email || m.id;
+      if (m.tiduuid) S.people.set(m.tiduuid, name);
+      if (m.id) S.people.set(m.id, name);
+    }
+    log(`Projektmedlemmar: ${members.length}.`);
+  } catch (e) { log(`Kunde inte läsa projektmedlemmar (${e.message}) – visar ID i stället för namn.`, "e"); }
+  try {
+    const me = await S.api.user.getUser();
+    S.me = new Set([me && me.tiduuid, me && me.id].filter(Boolean));
+    if (me && (me.firstName || me.lastName)) for (const k of S.me) if (!S.people.has(k)) S.people.set(k, [me.firstName, me.lastName].filter(Boolean).join(" "));
+  } catch { S.me = new Set(); }
+}
+function personName(uuid) {
+  if (!uuid) return "–";
+  const n = S.people.get(uuid);
+  const mine = S.me && S.me.has(uuid);
+  if (n) return mine ? `${n} (${t("you")})` : n;
+  return mine ? t("you") : uuid.slice(0, 8) + "…";
+}
+const fmtWhen = (iso) => { const d = new Date(iso); return isNaN(d) ? "–" : d.toLocaleString(LANG === "fi" ? "fi-FI" : "sv-FI", { day: "numeric", month: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
+
+function renderInfoMeta() {
+  const box = $("infoMeta"), hist = $("infoHist");
+  const o = S.info.cur;
+  const meta = o && o.srcLink && S.psetMeta && S.psetMeta.get(o.srcLink);
+  if (!meta || !meta.at) { box.hidden = true; hist.hidden = true; return; }
+  box.hidden = false;
+  box.textContent = `${S.info.histOpen ? "▾" : "▸"} ${t("updated")} ${fmtWhen(meta.at)} · ${personName(meta.by)}`;
+  box.title = t("histTip");
+  hist.hidden = !S.info.histOpen;
+}
+
+/** Hämta versionerna för elementets property set och visa vad som ändrades i varje. */
+async function loadHistory() {
+  const o = S.info.cur, hist = $("infoHist");
+  if (!o || !o.srcLink) return;
+  hist.innerHTML = `<div class="hint">${t("histLoading")}</div>`;
+  const libId = $("libId").value.trim(), defId = $("defId").value;
+  let list = [];
+  try {
+    const d = await pset("GET", `/psets/${encLink(o.srcLink)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}/versions?top=100`, undefined, { allow404: true });
+    list = itemsOf(d);
+  } catch (e) { hist.innerHTML = ""; const h = document.createElement("div"); h.className = "hint"; h.textContent = t("histFail"); hist.appendChild(h); return; }
+  if (S.info.cur !== o) return;
+  // Vissa svar saknar props i listan – hämta då varje version
+  if (list.length && list.every((x) => !x.props)) {
+    const full = [];
+    for (const x of list.slice(0, 30)) {
+      try { full.push(await pset("GET", `/psets/${encLink(o.srcLink)}/${encodeURIComponent(libId)}/${encodeURIComponent(defId)}/versions/${x.v}`)); } catch { full.push(x); }
+    }
+    list = full;
+  }
+  list.sort((a, b) => (a.v ?? 0) - (b.v ?? 0));
+  const rows = [];
+  let prev = {};
+  for (const ver of list) {
+    const cur = ver.props || {};
+    const changes = [];
+    const sk = $("statusKey").value;
+    for (const k of new Set([...Object.keys(prev), ...Object.keys(cur)])) {
+      const a = prev[k], b = cur[k];
+      if (JSON.stringify(a) === JSON.stringify(b)) continue;
+      if (k === sk) changes.push(`${a ? statusName(a) : "–"} → ${b ? statusName(b) : "–"}`);
+      else if (S.props[k]) {
+        if (k === (S.fields || {}).plannedWeek) continue;         // visas via planerat datum
+        const f = fmtValue("pmj", k, b);
+        changes.push(`${fieldName(k)}: ${b == null || b === "" ? "–" : f.text.replace(/^✓ /, "")}`);
+      }
+    }
+    if (changes.length) rows.push({ at: ver.modifiedAt || ver.createdAt, by: ver.modifiedBy || ver.createdBy, changes });
+    prev = cur;
+  }
+  hist.innerHTML = "";
+  if (!rows.length) { const h = document.createElement("div"); h.className = "hint"; h.textContent = t("histEmpty"); hist.appendChild(h); return; }
+  for (const r of rows.reverse().slice(0, 15)) {
+    const row = document.createElement("div");
+    row.className = "hrow";
+    row.innerHTML = `<div class="hw"></div><div class="hc"></div>`;
+    row.querySelector(".hw").textContent = `${fmtWhen(r.at)} · ${personName(r.by)}`;
+    row.querySelector(".hc").textContent = r.changes.join(" · ");
+    hist.appendChild(row);
+  }
+}
+function toggleHistory() {
+  S.info.histOpen = !S.info.histOpen;
+  renderInfoMeta();
+  if (S.info.histOpen) loadHistory();
 }
 
 // ---------- Snabbändring i infokortet (ett element) ----------
@@ -1429,6 +1542,7 @@ async function quickClear(key) {
   let saved;
   try { saved = await removePsetKeys(link, keys); }
   catch (e) { infoToast(t("saveFail"), true); throw e; }
+  o.srcLink = link;
   S.info.vals = { ...saved };
   log(`Tömde ${keys.map((k) => fieldName(k)).join(", ")} på ${o.forms.guid}.`);
   renderInfoOne(S.info.product, S.info.model, S.info.vals);
@@ -1480,6 +1594,7 @@ async function quickSave(props, status) {
   let saved;
   try { saved = await upsertPset(link, props); }
   catch (e) { infoToast(t("saveFail"), true); throw e; }
+  o.srcLink = link;
   S.info.vals = { ...S.info.vals, ...saved };
   log(`Snabbändring ${o.forms.guid}: ${short(props, 300)}`);
   if (status) {
@@ -1643,7 +1758,7 @@ function resetModelCache(reason) {
   log(`Modellen ändrades (${reason.replace("viewer.", "")}) – appen läser in strukturen på nytt vid nästa uppdatering.`);
 }
 
-async function afterToken() { await autoSetup(); }
+async function afterToken() { loadPeople(); await autoSetup(); }
 async function requestToken() {
   const r = await S.api.extension.requestPermission("accesstoken");
   if (r && r !== "pending" && r !== "denied") { const first = !S.token; S.token = r; if (first) await afterToken(); }
@@ -1701,6 +1816,7 @@ async function init() {
   });
   $("btnWrite").onclick = guard(writeSelected);
   $("infoStatus").onclick = toggleInfoMenu;
+  $("infoMeta").onclick = toggleHistory;
   $("btnInfoCfg").onclick = () => { const h = !$("infoCfg").hidden; $("infoCfg").hidden = h; if (!h) renderInfoCfg(); };
   $("cfgMark").onchange = () => { store.set("infoMark", $("cfgMark").value); refreshInfo(); };
   $("btnClear").onclick = () => { $("log").innerHTML = ""; };
