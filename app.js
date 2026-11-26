@@ -1,10 +1,10 @@
-/* PMJ 4D – v2.0
+/* PMJ 4D – v2.1
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
  */
 "use strict";
-const APP_VERSION = "2.0";
+const APP_VERSION = "2.1";
 
 // ---------- Statusfärger: PMJ-blått i processordning ----------
 const STATUS_COLORS = {
@@ -49,7 +49,7 @@ const T = {
     emptyTl: "Inga datum att visa än. Fyll i Suunniteltu Asennuspäivä eller sätt status med automatiska datum.",
     loadTl: "Läser in…",
     infoNone: "Markera ett element i 3D för att se dess uppgifter.", infoMulti: (n) => `${n} element markerade`,
-    noMark: "Inget elementnummer", cfgMark: "Elementnummer hämtas från", cfgFields: "Visa i korten (max 5)",
+    noMark: "Inget elementnummer", cfgMark: "Elementnummer hämtas från", cfgMark2: "Om det saknas, från", autoMark: "(automatiskt – vanliga Tekla-namn)", parts: (n) => `${n} delar`, cfgFields: "Visa i korten (max 5)",
     modelGroup: "Modellen", cfgPick: "Markera ett element för att se modellens egenskaper.", wkShort: "v",
     changeStatus: "Klicka för att ändra status", editDate: "Klicka för att ändra datum", saving: "Sparar…", saved: "Sparat ✓", cleared: "Tömt ✓", clear1: "Töm",
     updated: "Uppdaterad", you: "du", histTip: "Klicka för att se historiken", histLoading: "Hämtar historik…",
@@ -84,7 +84,7 @@ const T = {
     emptyTl: "Ei vielä päivämääriä. Täytä Suunniteltu Asennuspäivä tai aseta tila automaattisilla päivämäärillä.",
     loadTl: "Luetaan…",
     infoNone: "Valitse osa 3D:ssä nähdäksesi sen tiedot.", infoMulti: (n) => `${n} elementtiä valittu`,
-    noMark: "Ei elementtitunnusta", cfgMark: "Elementtitunnus haetaan kentästä", cfgFields: "Näytä korteissa (max 5)",
+    noMark: "Ei elementtitunnusta", cfgMark: "Elementtitunnus haetaan kentästä", cfgMark2: "Jos puuttuu, kentästä", autoMark: "(automaattinen – yleiset Tekla-nimet)", parts: (n) => `${n} osaa`, cfgFields: "Näytä korteissa (max 5)",
     modelGroup: "Malli", cfgPick: "Valitse osa nähdäksesi mallin ominaisuudet.", wkShort: "vk",
     changeStatus: "Klikkaa vaihtaaksesi tilan", editDate: "Klikkaa muuttaaksesi päivämäärää", saving: "Tallennetaan…", saved: "Tallennettu ✓", cleared: "Tyhjennetty ✓", clear1: "Tyhjennä",
     updated: "Päivitetty", you: "sinä", histTip: "Klikkaa nähdäksesi historian", histLoading: "Haetaan historiaa…",
@@ -751,8 +751,9 @@ function renderCards() {
   box.innerHTML = "";
   const keys = sortByProcess([...S.groups.keys()]);
   if (S.filter && !S.groups.has(S.filter)) S.filter = null;
+  S.rowGroups = buildGroups();
   for (const v of keys) {
-    const n = [...S.groups.get(v).values()].reduce((a, ids) => a + ids.length, 0);
+    const n = countOf(v);
     const b = document.createElement("div");
     b.className = "card fcard" + (S.hidden.has(v) ? " off" : "") + (S.filter === v ? " sel" : "") + (S.filter && S.filter !== v ? " dim" : "");
     b.style.setProperty("--c", colorFor(v) || "#d5dbe0");
@@ -774,7 +775,28 @@ function renderCards() {
   renderList();
 }
 
-function countOf(v) { const g = S.groups.get(v); return g ? [...g.values()].reduce((a, ids) => a + ids.length, 0) : 0; }
+/** Rader per kokoonpano: assembly-hierarki i första hand, annars samma tunnus, annars objektet självt. */
+function buildGroups() {
+  const byStatus = new Map();
+  for (const v of S.groups.keys()) {
+    const map = new Map();
+    for (const [m, ids] of S.groups.get(v)) for (const r of ids) {
+      const top = topElement(m, r);
+      const topInfo = S.elInfo.get(K(m, top)) || {}, own = S.elInfo.get(K(m, r)) || {};
+      const mark = topInfo.mark || own.mark || "";
+      const product = (top !== r ? topInfo.product : "") || own.product || topInfo.product || "";
+      const key = top !== r ? "a:" + K(m, top) : mark ? "t:" + m + ":" + mark : "o:" + K(m, r);
+      let g = map.get(key);
+      if (!g) { g = { key, v, m, mark, product, owners: [], d: null }; map.set(key, g); }
+      g.owners.push(r);
+      const d = statusDateOf(m, r, v);
+      if (d && (!g.d || d.ms > g.d.ms)) g.d = d;     // senaste datumet i kokoonpanon
+    }
+    byStatus.set(v, [...map.values()]);
+  }
+  return byStatus;
+}
+function countOf(v) { const g = S.rowGroups && S.rowGroups.get(v); return g ? g.length : 0; }
 
 function renderSummary() {
   const box = $("summary");
@@ -813,17 +835,11 @@ function statusDateOf(m, owner, status) {
 }
 
 function listRows() {
-  const rows = [];
   const keys = S.filter ? [S.filter] : sortByProcess([...S.groups.keys()]);
-  for (const v of keys) {
-    for (const [m, ids] of S.groups.get(v) || []) for (const r of ids) {
-      const info = S.elInfo.get(K(m, r)) || {};
-      rows.push({ m, r, v, mark: info.mark || "", product: info.product || "", d: statusDateOf(m, r, v) });
-    }
-  }
+  const rows = keys.flatMap((v) => (S.rowGroups && S.rowGroups.get(v)) || []);
   const q = S.query.trim().toLowerCase();
   const out = q ? rows.filter((x) => `${x.mark} ${x.product}`.toLowerCase().includes(q)) : rows;
-  const nat = (a, b) => a.mark.localeCompare(b.mark, undefined, { numeric: true }) || a.r - b.r;
+  const nat = (a, b) => (a.mark || "~").localeCompare(b.mark || "~", undefined, { numeric: true }) || a.product.localeCompare(b.product) || a.owners[0] - b.owners[0];
   if (S.filter) out.sort((a, b) => ((b.d ? b.d.ms : -1) - (a.d ? a.d.ms : -1)) || nat(a, b));   // senast först
   else { const order = sortByProcess([...S.groups.keys()]); out.sort((a, b) => (order.indexOf(a.v) - order.indexOf(b.v)) || nat(a, b)); }
   return out;
@@ -844,14 +860,14 @@ function renderList() {
     tr.className = "erow";
     tr.innerHTML = `<i></i><div class="em"><b></b><small></small></div><span class="es"></span><span class="ed"></span>`;
     tr.querySelector("i").style.background = colorFor(x.v) || "#d5dbe0";
-    tr.querySelector("b").textContent = x.mark || x.product || `#${x.r}`;
-    tr.querySelector("small").textContent = x.mark ? x.product : "";
+    tr.querySelector("b").textContent = x.mark || x.product || `#${x.owners[0]}`;
+    tr.querySelector("small").textContent = (x.mark ? x.product : "") + (x.owners.length > 1 ? `${x.mark ? " · " : ""}${t("parts", x.owners.length)}` : "");
     tr.querySelector(".es").textContent = S.filter ? "" : statusName(x.v);
     const ed = tr.querySelector(".ed");
     if (x.d) { ed.textContent = `${fmtDM(x.d.ms)}${new Date(x.d.ms).getUTCFullYear() % 100}`; if (!x.d.field) { ed.classList.add("soft"); ed.title = t("changedTip"); } }
     else ed.textContent = "–";
-    tr.onclick = () => selectInModel(x.m, x.r, false);
-    tr.ondblclick = () => selectInModel(x.m, x.r, true);
+    tr.onclick = () => selectInModel(x.m, x.owners, false);
+    tr.ondblclick = () => selectInModel(x.m, x.owners, true);
     body.appendChild(tr);
   }
   const more = $("listMore");
@@ -859,8 +875,8 @@ function renderList() {
   more.textContent = t("showMore", rows.length - S.listLimit);
 }
 
-async function selectInModel(m, r, zoom) {
-  const sel = { modelObjectIds: [{ modelId: m, objectRuntimeIds: [r] }] };
+async function selectInModel(m, rids, zoom) {
+  const sel = { modelObjectIds: [{ modelId: m, objectRuntimeIds: [].concat(rids) }] };
   try { await S.api.viewer.setSelection(sel, "set"); } catch (e) { log(`Markering misslyckades: ${e.message}`, "e"); }
   if (zoom) { try { await S.api.viewer.setCamera(sel, { animationTime: 400 }); } catch { /* valfritt */ } }
   setTimeout(pollSelection, 50);
@@ -869,8 +885,10 @@ async function selectInModel(m, r, zoom) {
 /** Hämta elementnummer och produktnamn för listan (i omgångar, i bakgrunden). */
 async function loadElementInfo() {
   const todo = new Map();
-  for (const g of S.groups.values()) for (const [m, ids] of g) for (const r of ids) if (!S.elInfo.has(K(m, r))) addTo(todo, m, r);
+  const want = (m, r) => { if (!S.elInfo.has(K(m, r)) && !(todo.get(m) || []).includes(r)) addTo(todo, m, r); };
+  for (const g of S.groups.values()) for (const [m, ids] of g) for (const r of ids) { want(m, r); const top = topElement(m, r); if (top !== r) want(m, top); }
   const seq = (S.elSeq = (S.elSeq || 0) + 1);
+  let autoNote = null;
   for (const [m, ids] of todo) {
     for (let i = 0; i < ids.length; i += 100) {
       if (seq !== S.elSeq) return;
@@ -878,13 +896,16 @@ async function loadElementInfo() {
       try { res = (await withTimeout(S.api.viewer.getObjectProperties(m, ids.slice(i, i + 100)))) || []; } catch { res = []; }
       for (const o of res) {
         if (!o) continue;
-        const mk = findProp(flatProps(o), markId());
-        S.elInfo.set(K(m, o.id), { mark: mk && mk.value != null ? String(mk.value) : "", product: (o.product && o.product.name) || o.class || "" });
+        const mk = findMark(flatProps(o));
+        if (mk && mk.auto && !autoNote) autoNote = mk.id;
+        S.elInfo.set(K(m, o.id), { mark: mk ? mk.value : "", product: (o.product && o.product.name) || o.class || "" });
       }
       for (const r of ids.slice(i, i + 100)) if (!S.elInfo.has(K(m, r))) S.elInfo.set(K(m, r), {});
-      renderList();
+      if (i % 500 === 0) renderCards();
     }
   }
+  if (autoNote) log(`Elementtitunnus hittades automatiskt i "${autoNote.replace("|", " › ")}".`);
+  renderCards();
 }
 
 // ---------- Fyll i ----------
@@ -1314,6 +1335,18 @@ function infoFields() {
   return [F.sent, F.made, F.plannedDate, F.installed].filter(Boolean).map((k) => "pmj:" + k).concat(["ifc:Tekla Assembly|Assembly/Cast unit weight"]).slice(0, MAX_CARDS);
 }
 const markId = () => store.get("infoMark") || DEFAULT_MARK;
+const markId2 = () => store.get("infoMark2") || "";
+// Vanliga namn på kokoonpanotunnus i Tekla-exporter (stål och betong)
+const MARK_NAMES = /^(assembly\/cast unit mark|assembly mark|assembly_pos|assembly position|cast unit mark|cast_unit_mark|kokoonpanotunnus|kokoonpanon tunnus|elementtitunnus|elementin tunnus|elementtinumero)$/i;
+/** Elementnummer: huvudegenskap → reservegenskap → känt Tekla-namn. Returnerar {value, id} eller null. */
+function findMark(props) {
+  for (const id of [markId(), markId2()].filter(Boolean)) {
+    const p = findProp(props, id);
+    if (p && p.value != null && String(p.value).trim() !== "") return { value: String(p.value), id };
+  }
+  const p = props.find((q) => MARK_NAMES.test(String(q.name).trim()) && q.value != null && String(q.value).trim() !== "");
+  return p ? { value: String(p.value), id: propId(p), auto: true } : null;
+}
 
 /** PMJ-värden för ett element: elementets egna, annars från någon av dess delar. */
 async function pmjValuesFor(o) {
@@ -1439,7 +1472,7 @@ function flashInfo(key) {
 function renderInfoOne(product, props, vals) {
   $("info").classList.remove("blank");
   $("infoTitle").textContent = product || "–";
-  const mark = findProp(props, markId());
+  const mark = findMark(props);
   const mk = $("infoMark");
   if (mark && mark.value != null && mark.value !== "") { mk.textContent = String(mark.value); mk.className = "imark"; }
   else { mk.textContent = t("noMark"); mk.className = "imark none"; }
@@ -1486,6 +1519,15 @@ function renderInfoCfg() {
     selM.add(new Option(`${set} › ${name}${p && p.value != null && p.value !== "" ? `  (${p.value})` : ""}`, id));
   }
   selM.value = cur;
+  const sel2 = $("cfgMark2"), cur2 = markId2();
+  sel2.innerHTML = "";
+  sel2.add(new Option(t("autoMark"), ""));
+  for (const id of [...new Set([cur2, ...model.map(propId)].filter(Boolean))]) {
+    const p = findProp(model, id);
+    const [set, name] = id.split("|");
+    sel2.add(new Option(`${set} › ${name}${p && p.value != null && p.value !== "" ? `  (${p.value})` : ""}`, id));
+  }
+  sel2.value = cur2;
   // Kort
   const chosen = infoFields();
   const box = $("cfgFields");
@@ -1975,7 +2017,9 @@ async function init() {
   $("infoStatus").onclick = toggleInfoMenu;
   $("infoMeta").onclick = toggleHistory;
   $("btnInfoCfg").onclick = () => { const h = !$("infoCfg").hidden; $("infoCfg").hidden = h; if (!h) renderInfoCfg(); };
-  $("cfgMark").onchange = () => { store.set("infoMark", $("cfgMark").value); refreshInfo(); };
+  const markChanged = () => { S.elInfo = new Map(); refreshInfo(); if (S.groups.size) loadElementInfo(); };
+  $("cfgMark").onchange = () => { store.set("infoMark", $("cfgMark").value); markChanged(); };
+  $("cfgMark2").onchange = () => { store.set("infoMark2", $("cfgMark2").value); markChanged(); };
   $("btnClear").onclick = () => { $("log").innerHTML = ""; };
   $("btnToken").onclick = guard(requestToken);
   $("btnCopy").onclick = () => {

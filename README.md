@@ -1,4 +1,4 @@
-# PMJ 4D – v2.0
+# PMJ 4D – v2.1
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -48,6 +48,7 @@ Allt sparas per projekt i webbläsaren. ⚙ öppnas bara om något inte kunde hi
 - *Näytä tilat* färgar modellen. Därefter heter knappen *↻ Päivitä tilat*. *Poista värit* tar bort färgerna men behåller listan.
 - Klick på ett statuskort filtrerar listan till den statusen, och ett nytt klick (eller ✕) visar alla igen. Ögat ◉ på kortet döljer eller visar statusen i modellen.
 - Listan visar elementnummer, produkt, status och datum. Med filter sorteras listan på när elementen fick statusen, senast först, enligt statusens eget datumfält (piirustukset lähetetty, valmistuspäivämäärä, asennuspäivämäärä eller suunniteltu asennuspäivä). Saknas det datumet visas senaste ändringen i kursiv stil.
+- Listan och korten räknar **kokoonpanot**. Delar slås ihop via modellens assembly-hierarki, eller, när den saknas (t.ex. stål exporterat utan assemblies), via samma kokoonpanotunnus. Raden visar då t.ex. *PP-1 · PUTKIPILARI · 3 osaa*.
 - Klick på en rad markerar elementet i 3D, och dubbelklick zoomar dit. Sökfältet filtrerar på elementnummer och produkt.
 
 **Fyll i:** Markera objekt i 3D, klicka på en status och lägg eventuellt till ett datum. Klicka sedan *Tallenna*. Värdena sparas direkt och modellen färgas om.
@@ -71,7 +72,7 @@ Låter du dagens datum stå kvar fylls det bara i där fältet är tomt. Väljer
 - Statusen som ett färgat märke.
 - Upp till 5 små kort med valfria PMJ-fält och modellegenskaper. Ifyllda datum visas med ✓ och datum, och planerat datum visas med veckonummer.
 - Markerar man flera element visas antal per status.
-- ⚙ i kortet: välj vilken modellegenskap elementnumret hämtas från (listan visar egenskaperna för det markerade elementet), och vilka kort som visas. Valen sparas i webbläsaren.
+- ⚙ i kortet: välj vilken modellegenskap elementnumret hämtas från, och en reservegenskap om den första saknas (t.ex. betong *Assembly/Cast unit Mark*, stål *Assembly mark*). Hittas ingen av dem provar appen automatiskt vanliga Tekla-namn (listan visar egenskaperna för det markerade elementet), och vilka kort som visas. Valen sparas i webbläsaren.
 
 **Snabbändring i kortet (ett element):** Klicka på statusmärket för att välja en ny status. Den sparas direkt, och samma automatiska datum som i Täytä fylls i om fältet är tomt. Klicka på ett PMJ-datumkort (✎) för att välja ett nytt datum. Det sparas direkt, och för planerat datum räknas veckan ut. Finns redan ett datum visas **✕ Tyhjennä** under datumfältet (eller använd kalenderns *Clear*) för att ta bort det. För planerat datum töms veckan samtidigt. Statusen ändras inte. Snabbändring sparar alltid på riktigt. Vid flera markerade element används fliken Täytä.
 
