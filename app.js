@@ -1,10 +1,10 @@
-/* PMJ 4D – v2.1
+/* PMJ 4D – v2.2
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
  */
 "use strict";
-const APP_VERSION = "2.1";
+const APP_VERSION = "2.2";
 
 // ---------- Statusfärger: PMJ-blått i processordning ----------
 const STATUS_COLORS = {
@@ -27,8 +27,9 @@ const T = {
     discover: "Hitta från markerat objekt", region: "Region", done: "Klar",
     tabView: "Översikt", tabFill: "Fyll i", refresh: "Visa status", refresh2: "↻ Uppdatera status", clear: "Rensa färger",
     emptyView: "Läser in läget…",
-    cardsHint: "Klicka på en status för att lista dess element. ◉ döljer eller visar den i modellen.",
-    cardTip: "Klicka för att filtrera listan", eyeHide: "Dölj i modellen", eyeShow: "Visa i modellen",
+    cardsHint: "Klicka på en status för att lista den och dölja eller visa den i modellen.",
+    cardTip: "Klicka för att filtrera listan",
+    visHide: (s) => `Dölj ${s}`, visShow: (s) => `Visa ${s}`, visOnly: (s) => `Bara ${s}`, visAll: "Visa alla", visAllTip: (n) => `${n} status dolda`, eyeHide: "Dölj i modellen", eyeShow: "Visa i modellen",
     sumHead: (a, n) => `Monterat ${a} / ${n}`, asOf: "läge kl.", listAll: (n) => `Alla element (${n})`, date: "Datum",
     changed: "Ändrad", changedTip: "Senast ändrad (statusen har inget eget datumfält ifyllt)", showMore: (n) => `Visa fler (${n})`,
     search: "Sök elementnummer…",
@@ -62,8 +63,9 @@ const T = {
     discover: "Hae valitusta osasta", region: "Alue", done: "Valmis",
     tabView: "Yleiskuva", tabFill: "Täytä", refresh: "Näytä tilat", refresh2: "↻ Päivitä tilat", clear: "Poista värit",
     emptyView: "Luetaan tilannetta…",
-    cardsHint: "Klikkaa tilaa listataksesi sen elementit. ◉ piilottaa tai näyttää sen mallissa.",
-    cardTip: "Klikkaa suodattaaksesi listan", eyeHide: "Piilota mallista", eyeShow: "Näytä mallissa",
+    cardsHint: "Klikkaa tilaa listataksesi sen ja piilottaaksesi tai näyttääksesi sen mallissa.",
+    cardTip: "Klikkaa suodattaaksesi listan",
+    visHide: (s) => `Piilota ${s}`, visShow: (s) => `Näytä ${s}`, visOnly: (s) => `Vain ${s}`, visAll: "Näytä kaikki", visAllTip: (n) => `${n} tilaa piilotettu`, eyeHide: "Piilota mallista", eyeShow: "Näytä mallissa",
     sumHead: (a, n) => `Asennettu ${a} / ${n}`, asOf: "tilanne klo", listAll: (n) => `Kaikki elementit (${n})`, date: "Pvm",
     changed: "Muutettu", changedTip: "Viimeksi muutettu (tilalla ei ole omaa päivämääräkenttää täytettynä)", showMore: (n) => `Näytä lisää (${n})`,
     search: "Hae elementtitunnusta…",
@@ -733,6 +735,15 @@ async function colorModel() {
   if (S.groups.size) await paintOverview();
 }
 
+/** Tillämpa S.hidden på modellen (färgar först om det behövs). */
+async function applyHidden() {
+  if (!S.painted) { await paintOverview(); return; }
+  for (const [v, leaves] of S.leafGroups || []) await S.api.viewer.setObjectState(selectorFor(leaves), { visible: !S.hidden.has(v) });
+  renderCards();
+}
+async function isolateStatus(v) { S.hidden = new Set([...S.groups.keys()].filter((k) => k !== v)); await applyHidden(); }
+async function showAllStatuses() { S.hidden.clear(); await applyHidden(); }
+
 async function toggleStatus(v) {
   const leaves = S.leafGroups && S.leafGroups.get(v);
   if (!leaves) return;
@@ -763,7 +774,8 @@ function renderCards() {
     b.title = t("cardTip");
     b.onclick = () => { S.filter = S.filter === v ? null : v; S.listLimit = 150; renderCards(); };
     const eye = b.querySelector(".eye");
-    eye.textContent = S.hidden.has(v) ? "◌" : "◉";
+    eye.innerHTML = S.hidden.has(v) ? EYE_OFF : EYE_ON;
+    eye.classList.toggle("is-off", S.hidden.has(v));
     eye.title = S.hidden.has(v) ? t("eyeShow") : t("eyeHide");
     eye.onclick = (e) => { e.stopPropagation(); guard(() => toggleStatus(v))(); };
     box.appendChild(b);
@@ -771,6 +783,7 @@ function renderCards() {
   $("cardsEmpty").hidden = keys.length > 0;
   $("cardsHint").hidden = keys.length === 0;
   $("btnColor").textContent = S.painted ? t("refresh2") : t("refresh");
+  renderVisBar();
   renderSummary();
   renderList();
 }
@@ -796,6 +809,25 @@ function buildGroups() {
   }
   return byStatus;
 }
+const EYE_ON = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.4 10.4 0 0 1 12 19C5 19 1 12 1 12a18.5 18.5 0 0 1 5.1-5.9M9.9 5.2A9.7 9.7 0 0 1 12 5c7 0 11 7 11 7a18.6 18.6 0 0 1-2.2 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M1 1l22 22"/></svg>';
+
+/** Raden med synlighetsknappar under korten. */
+function renderVisBar() {
+  const bar = $("visBar");
+  bar.innerHTML = "";
+  const v = S.filter, nHidden = S.hidden.size;
+  const btn = (html, cls, fn, title) => { const b = document.createElement("button"); b.className = "vbtn " + cls; b.innerHTML = html; if (title) b.title = title; b.onclick = guard(fn); bar.appendChild(b); };
+  if (v) {
+    const hid = S.hidden.has(v);
+    btn(`${hid ? EYE_ON : EYE_OFF}<span>${hid ? t("visShow", statusName(v)) : t("visHide", statusName(v))}</span>`, hid ? "" : "warn", () => toggleStatus(v));
+    const only = S.hidden.size === S.groups.size - 1 && !S.hidden.has(v);
+    if (!only) btn(`${EYE_ON}<span>${t("visOnly", statusName(v))}</span>`, "", () => isolateStatus(v));
+  }
+  if (nHidden) btn(`<span>${t("visAll")}</span>`, "ghost", showAllStatuses, t("visAllTip", nHidden));
+  bar.hidden = !bar.childElementCount;
+}
+
 function countOf(v) { const g = S.rowGroups && S.rowGroups.get(v); return g ? g.length : 0; }
 
 function renderSummary() {

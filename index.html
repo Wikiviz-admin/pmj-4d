@@ -78,8 +78,18 @@
   .fcard.sel { background:#fff; box-shadow:0 0 0 2px var(--c), 0 2px 8px rgba(0,40,70,.12); }
   .fcard.dim { opacity:.55; }
   .fcard.off .n { text-decoration:line-through; }
-  .fcard .eye { position:absolute; top:5px; right:5px; border:0; background:none; color:var(--muted); font-size:13px; cursor:pointer; padding:2px 4px; border-radius:4px; }
-  .fcard .eye:hover { background:rgba(0,0,0,.06); color:var(--navy); }
+  .fcard .eye { position:absolute; top:6px; right:6px; border:0; background:#fff; color:var(--navy); cursor:pointer; padding:4px; border-radius:6px;
+               display:flex; box-shadow:0 0 0 1px var(--line); }
+  .fcard .eye:hover { background:#e2f3f9; }
+  .fcard .eye.is-off { background:#d64545; color:#fff; box-shadow:none; }
+  .fcard.off { opacity:.6; }
+  .fcard.sel.off { opacity:1; }
+  .visbar { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px; }
+  .vbtn { display:flex; align-items:center; gap:6px; border:1px solid var(--navy); background:#fff; color:var(--navy); border-radius:7px; padding:6px 10px; font:600 12px inherit; cursor:pointer; }
+  .vbtn:hover { background:#eef8fb; }
+  .vbtn.warn { border-color:#d64545; color:#d64545; }
+  .vbtn.warn:hover { background:#fdeeee; }
+  .vbtn.ghost { border-color:var(--line); color:var(--ink); font-weight:600; }
   .elist { margin-top:12px; padding-bottom:150px; }
   .lhead { display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--navy); margin-bottom:6px; }
   .elist input { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:12px; }
@@ -242,6 +252,7 @@
     </div>
     <div id="cards" class="cards"></div>
     <div id="cardsEmpty" class="empty" data-t="emptyView"></div>
+    <div id="visBar" class="visbar" hidden></div>
     <div id="cardsHint" class="hint" data-t="cardsHint" hidden></div>
     <div id="elList" class="elist" hidden>
       <div class="lhead"><b id="listTitle"></b><button id="listClear" class="icon" hidden>✕</button></div>
@@ -319,6 +330,6 @@
 </section></div>
 
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
-<script src="app.js?v=2.1"></script>
+<script src="app.js?v=2.2"></script>
 </body>
 </html>
