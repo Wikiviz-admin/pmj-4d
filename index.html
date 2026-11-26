@@ -67,6 +67,33 @@
   .brush:disabled { opacity:.45; cursor:default; }
   .brush.on { background:var(--navy); color:#fff; border-style:solid; animation:pulse 1.6s ease-in-out infinite; }
   @keyframes pulse { 50% { box-shadow:0 0 0 4px rgba(0,167,219,.25); } }
+  /* Yleiskuva: sammanfattning, filterkort, lista */
+  .summary { background:#fff; border:1px solid var(--line); border-top:4px solid var(--navy); border-radius:10px; padding:9px 12px 10px; margin-bottom:10px; }
+  .shead { display:flex; align-items:baseline; justify-content:space-between; font-weight:700; font-size:13px; color:var(--navy); }
+  .shead b { font-size:20px; color:#3aa845; }
+  .sbar { display:flex; height:10px; border-radius:5px; overflow:hidden; background:var(--soft); margin:7px 0 6px; gap:1px; }
+  .sbar i { display:block; height:100%; }
+  .ssub { font-size:10.5px; color:var(--muted); }
+  .fcard { cursor:pointer; position:relative; transition:opacity .15s, box-shadow .15s; }
+  .fcard.sel { background:#fff; box-shadow:0 0 0 2px var(--c), 0 2px 8px rgba(0,40,70,.12); }
+  .fcard.dim { opacity:.55; }
+  .fcard.off .n { text-decoration:line-through; }
+  .fcard .eye { position:absolute; top:5px; right:5px; border:0; background:none; color:var(--muted); font-size:13px; cursor:pointer; padding:2px 4px; border-radius:4px; }
+  .fcard .eye:hover { background:rgba(0,0,0,.06); color:var(--navy); }
+  .elist { margin-top:12px; padding-bottom:150px; }
+  .lhead { display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--navy); margin-bottom:6px; }
+  .elist input { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; font-size:12px; }
+  .lcols { display:flex; justify-content:space-between; font-size:9.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); padding:6px 4px 3px; }
+  .erow { display:flex; align-items:center; gap:7px; padding:5px 4px; border-bottom:1px solid var(--soft); cursor:pointer; border-radius:4px; }
+  .erow:hover { background:#eef8fb; }
+  .erow i { width:4px; align-self:stretch; border-radius:2px; flex:none; }
+  .erow .em { flex:1; min-width:0; display:flex; flex-direction:column; }
+  .erow .em b { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .erow .em small { font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .erow .es { font-size:9.5px; font-weight:700; color:var(--muted); white-space:nowrap; }
+  .erow .ed { font-size:11.5px; font-weight:600; color:var(--ink); white-space:nowrap; min-width:52px; text-align:right; }
+  .erow .ed.soft { color:var(--muted); font-weight:400; font-style:italic; }
+
   /* 4D */
   .seg { display:flex; background:var(--soft); border-radius:8px; padding:3px; margin-bottom:12px; }
   .seg button { flex:1; border:0; background:none; padding:7px 0; border-radius:6px; color:var(--muted); font-weight:600; }
@@ -208,9 +235,21 @@
       <button id="btnColor" class="btn" data-t="refresh"></button>
       <button id="btnReset" class="btn ghost" data-t="clear"></button>
     </div>
+    <div id="summary" class="summary" hidden>
+      <div class="shead"><span id="sumHead"></span><b id="sumPct"></b></div>
+      <div id="sumBar" class="sbar"></div>
+      <div id="sumSub" class="ssub"></div>
+    </div>
     <div id="cards" class="cards"></div>
     <div id="cardsEmpty" class="empty" data-t="emptyView"></div>
     <div id="cardsHint" class="hint" data-t="cardsHint" hidden></div>
+    <div id="elList" class="elist" hidden>
+      <div class="lhead"><b id="listTitle"></b><button id="listClear" class="icon" hidden>✕</button></div>
+      <input id="listSearch" type="text" data-tp="search">
+      <div class="lcols"><span></span><span id="listDateHead"></span></div>
+      <div id="elRows"></div>
+      <button id="listMore" class="btn ghost" style="width:100%;margin-top:6px" hidden></button>
+    </div>
   </div>
 
   <div id="paneFill" hidden>
@@ -278,6 +317,6 @@
 </section></div>
 
 <script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
-<script src="app.js?v=1.9"></script>
+<script src="app.js?v=2.0"></script>
 </body>
 </html>

@@ -1,10 +1,10 @@
-/* PMJ 4D – v1.9
+/* PMJ 4D – v2.0
  * Trimble Connect 3D Viewer extension för PMJ Service.
  * Läser och skriver "Rakennusosan Status" via Trimble Property Set API
  * och färgar modellen efter status.
  */
 "use strict";
-const APP_VERSION = "1.9";
+const APP_VERSION = "2.0";
 
 // ---------- Statusfärger: PMJ-blått i processordning ----------
 const STATUS_COLORS = {
@@ -25,9 +25,13 @@ const T = {
     pset: "Property set", statusField: "Statusfält", linkTpl: "Länkmall",
     linkHint: "Sätt status för hand på ett objekt i Connect, markera det och klicka nedan.",
     discover: "Hitta från markerat objekt", region: "Region", done: "Klar",
-    tabView: "Översikt", tabFill: "Fyll i", refresh: "Uppdatera", clear: "Rensa färger",
-    emptyView: "Klicka på Uppdatera för att färga modellen efter status.",
-    cardsHint: "Klicka på en status för att dölja eller visa den.",
+    tabView: "Översikt", tabFill: "Fyll i", refresh: "Visa status", refresh2: "↻ Uppdatera status", clear: "Rensa färger",
+    emptyView: "Läser in läget…",
+    cardsHint: "Klicka på en status för att lista dess element. ◉ döljer eller visar den i modellen.",
+    cardTip: "Klicka för att filtrera listan", eyeHide: "Dölj i modellen", eyeShow: "Visa i modellen",
+    sumHead: (a, n) => `Monterat ${a} / ${n}`, asOf: "läge kl.", listAll: (n) => `Alla element (${n})`, date: "Datum",
+    changed: "Ändrad", changedTip: "Senast ändrad (statusen har inget eget datumfält ifyllt)", showMore: (n) => `Visa fler (${n})`,
+    search: "Sök elementnummer…",
     selected: "objekt markerade", dateField: "Datumfält", date: "Datum",
     save: (n) => `Spara på ${n} objekt`,
     none: "Utan status", debug: "Felsökning", props: "Objektets egenskaper", copy: "Kopiera logg",
@@ -56,9 +60,13 @@ const T = {
     pset: "Ominaisuusjoukko", statusField: "Tilakenttä", linkTpl: "Linkkimalli",
     linkHint: "Aseta tila käsin yhdelle osalle Connectissa, valitse se ja klikkaa alla.",
     discover: "Hae valitusta osasta", region: "Alue", done: "Valmis",
-    tabView: "Yleiskuva", tabFill: "Täytä", refresh: "Päivitä", clear: "Poista värit",
-    emptyView: "Klikkaa Päivitä, niin malli väritetään tilan mukaan.",
-    cardsHint: "Klikkaa tilaa piilottaaksesi tai näyttääksesi sen.",
+    tabView: "Yleiskuva", tabFill: "Täytä", refresh: "Näytä tilat", refresh2: "↻ Päivitä tilat", clear: "Poista värit",
+    emptyView: "Luetaan tilannetta…",
+    cardsHint: "Klikkaa tilaa listataksesi sen elementit. ◉ piilottaa tai näyttää sen mallissa.",
+    cardTip: "Klikkaa suodattaaksesi listan", eyeHide: "Piilota mallista", eyeShow: "Näytä mallissa",
+    sumHead: (a, n) => `Asennettu ${a} / ${n}`, asOf: "tilanne klo", listAll: (n) => `Kaikki elementit (${n})`, date: "Pvm",
+    changed: "Muutettu", changedTip: "Viimeksi muutettu (tilalla ei ole omaa päivämääräkenttää täytettynä)", showMore: (n) => `Näytä lisää (${n})`,
+    search: "Hae elementtitunnusta…",
     selected: "osaa valittu", dateField: "Päivämääräkenttä", date: "Päivämäärä",
     save: (n) => `Tallenna ${n} osaan`,
     none: "Ei tilaa", debug: "Vianetsintä", props: "Osan ominaisuudet", copy: "Kopioi loki",
@@ -649,8 +657,8 @@ function diagnoseLinks(index, tpl, matched, defaulted, def) {
   if (index.size && !matched) log("Inga sparade värden hittades i de öppna modellerna – länkmallen stämmer troligen inte. Öppna ⚙ och klicka 'Hitta från markerat objekt' på ett element med sparad status.", "e");
 }
 
-async function colorModel() {
-  if (S.tl) S.tl.painted = false;
+/** Räkna ut status per element (utan att färga modellen). */
+async function computeOverview() {
   let tpl = $("linkTpl").value.trim();
   const key = $("statusKey").value;
   if (!tpl || !key) { openSetup(true); log(t("needSetup"), "e"); return; }
@@ -659,11 +667,14 @@ async function colorModel() {
   const models = ((await S.api.viewer.getObjects()) || []).map((m) => ({ modelId: m.modelId, rids: (m.objects || []).map((o) => o.id) }));
   // 1) Sparade värden per objekt
   const saved = new Map();
+  S.linkOf = new Map();
   let matched = 0;
   for (const { modelId, rids } of models) {
     const ext = await toExternalIds(modelId, rids);
     for (const r of rids) {
-      const props = ext.has(r) ? index.get(buildLink(tpl, idForms(ext.get(r)), modelId)) : null;
+      const lnk = ext.has(r) ? buildLink(tpl, idForms(ext.get(r)), modelId) : null;
+      if (lnk) S.linkOf.set(K(modelId, r), lnk);
+      const props = lnk ? index.get(lnk) : null;
       if (props) matched++;
       if (props && props[key]) saved.set(K(modelId, r), String(props[key]));
     }
@@ -697,7 +708,14 @@ async function colorModel() {
   diagnoseLinks(index, tpl, matched, defaulted, def);
   log(`Struktur: ${S.asm.size} element med delar, ${S.containers.size} behållare (byggnad/våningar) lämnas orörda.`);
   if (mixed) log(`Obs: ${mixed} delar har en annan sparad status än sitt element (status sparad på delnivå). De visas med delens egen status. Ny sparning från appen sker alltid på elementet.`, "e");
-  // 4) Färg och synlighet – bara på löv
+  S.computedAt = new Date();
+  renderCards();
+  loadElementInfo();
+}
+
+/** Färga och dölj enligt uträknad status – bara på löv. */
+async function paintOverview() {
+  if (S.tl) S.tl.painted = false;
   await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
   for (const [v, byModel] of S.leafGroups) {
     const color = colorFor(v);
@@ -706,7 +724,13 @@ async function colorModel() {
     if (S.hidden.has(v)) state.visible = false;
     if (Object.keys(state).length) await S.api.viewer.setObjectState(selectorFor(byModel), state);
   }
+  S.painted = true;
   renderCards();
+}
+
+async function colorModel() {
+  await computeOverview();
+  if (S.groups.size) await paintOverview();
 }
 
 async function toggleStatus(v) {
@@ -714,27 +738,153 @@ async function toggleStatus(v) {
   if (!leaves) return;
   const hide = !S.hidden.has(v);
   hide ? S.hidden.add(v) : S.hidden.delete(v);
+  if (!S.painted) { await paintOverview(); return; }
   await S.api.viewer.setObjectState(selectorFor(leaves), { visible: !hide });
   renderCards();
 }
+
+const DATE_ROLE_FOR = { "PIIRUSTUS OK": "sent", "VALMISTETTU": "made", "ASENNETTU": "installed", "SUUNNITELTU": "plannedDate" };
+S.filter = null; S.listLimit = 150; S.elInfo = new Map(); S.query = "";
 
 function renderCards() {
   const box = $("cards");
   box.innerHTML = "";
   const keys = sortByProcess([...S.groups.keys()]);
+  if (S.filter && !S.groups.has(S.filter)) S.filter = null;
   for (const v of keys) {
     const n = [...S.groups.get(v).values()].reduce((a, ids) => a + ids.length, 0);
-    const b = document.createElement("button");
-    b.className = "card" + (S.hidden.has(v) ? " off" : "");
+    const b = document.createElement("div");
+    b.className = "card fcard" + (S.hidden.has(v) ? " off" : "") + (S.filter === v ? " sel" : "") + (S.filter && S.filter !== v ? " dim" : "");
     b.style.setProperty("--c", colorFor(v) || "#d5dbe0");
-    b.innerHTML = `<div class="n"></div><div class="t"></div>`;
+    b.innerHTML = `<div class="n"></div><div class="t"></div><button class="eye"></button>`;
     b.querySelector(".n").textContent = n;
     b.querySelector(".t").textContent = statusName(v);
-    b.onclick = guard(() => toggleStatus(v));
+    b.title = t("cardTip");
+    b.onclick = () => { S.filter = S.filter === v ? null : v; S.listLimit = 150; renderCards(); };
+    const eye = b.querySelector(".eye");
+    eye.textContent = S.hidden.has(v) ? "◌" : "◉";
+    eye.title = S.hidden.has(v) ? t("eyeShow") : t("eyeHide");
+    eye.onclick = (e) => { e.stopPropagation(); guard(() => toggleStatus(v))(); };
     box.appendChild(b);
   }
   $("cardsEmpty").hidden = keys.length > 0;
   $("cardsHint").hidden = keys.length === 0;
+  $("btnColor").textContent = S.painted ? t("refresh2") : t("refresh");
+  renderSummary();
+  renderList();
+}
+
+function countOf(v) { const g = S.groups.get(v); return g ? [...g.values()].reduce((a, ids) => a + ids.length, 0) : 0; }
+
+function renderSummary() {
+  const box = $("summary");
+  const keys = sortByProcess([...S.groups.keys()]);
+  const total = keys.reduce((a, v) => a + countOf(v), 0);
+  box.hidden = !total;
+  if (!total) return;
+  const inst = countOf("ASENNETTU");
+  $("sumHead").textContent = t("sumHead", inst, total);
+  $("sumPct").textContent = `${Math.round((inst / total) * 100)} %`;
+  const bar = $("sumBar");
+  bar.innerHTML = "";
+  for (const v of [...keys].reverse()) {           // valmiit vasemmalle
+    if (v === NONE) continue;
+    const seg = document.createElement("i");
+    seg.style.width = `${(countOf(v) / total) * 100}%`;
+    seg.style.background = colorFor(v);
+    seg.title = `${statusName(v)}: ${countOf(v)}`;
+    bar.appendChild(seg);
+  }
+  const parts = ["VALMISTETTU", "TUOTANNOSSA", "PIIRUSTUS OK"].filter((v) => countOf(v)).map((v) => `${statusName(v)} ${countOf(v)}`);
+  $("sumSub").textContent = parts.join(" · ") + (S.computedAt ? `${parts.length ? " · " : ""}${t("asOf")} ${S.computedAt.toLocaleTimeString(LANG === "fi" ? "fi-FI" : "sv-FI", { hour: "2-digit", minute: "2-digit" })}` : "");
+}
+
+/** Elementets "datum för statusen": statusens eget datumfält, annars senaste ändring. */
+function statusDateOf(m, owner, status) {
+  const link = S.linkOf && S.linkOf.get(K(m, owner));
+  const props = (link && S.psetIndex && S.psetIndex.get(link)) || {};
+  const role = DATE_ROLE_FOR[String(status).toUpperCase()];
+  const key = role && (S.fields || {})[role];
+  const ms = key ? parseDay(props[key]) : null;
+  if (ms) return { ms, field: true };
+  const meta = link && S.psetMeta && S.psetMeta.get(link);
+  if (meta && meta.at && props[$("statusKey").value]) { const d = Date.parse(meta.at); if (!isNaN(d)) return { ms: d, field: false }; }
+  return null;
+}
+
+function listRows() {
+  const rows = [];
+  const keys = S.filter ? [S.filter] : sortByProcess([...S.groups.keys()]);
+  for (const v of keys) {
+    for (const [m, ids] of S.groups.get(v) || []) for (const r of ids) {
+      const info = S.elInfo.get(K(m, r)) || {};
+      rows.push({ m, r, v, mark: info.mark || "", product: info.product || "", d: statusDateOf(m, r, v) });
+    }
+  }
+  const q = S.query.trim().toLowerCase();
+  const out = q ? rows.filter((x) => `${x.mark} ${x.product}`.toLowerCase().includes(q)) : rows;
+  const nat = (a, b) => a.mark.localeCompare(b.mark, undefined, { numeric: true }) || a.r - b.r;
+  if (S.filter) out.sort((a, b) => ((b.d ? b.d.ms : -1) - (a.d ? a.d.ms : -1)) || nat(a, b));   // senast först
+  else { const order = sortByProcess([...S.groups.keys()]); out.sort((a, b) => (order.indexOf(a.v) - order.indexOf(b.v)) || nat(a, b)); }
+  return out;
+}
+
+function renderList() {
+  const wrap = $("elList"), body = $("elRows");
+  const has = S.groups.size > 0;
+  wrap.hidden = !has;
+  if (!has) return;
+  const rows = listRows();
+  $("listTitle").textContent = S.filter ? `${statusName(S.filter)} (${rows.length})` : t("listAll", rows.length);
+  $("listClear").hidden = !S.filter;
+  $("listDateHead").textContent = S.filter ? (DATE_ROLE_FOR[S.filter] && (S.fields || {})[DATE_ROLE_FOR[S.filter]] ? fieldName(S.fields[DATE_ROLE_FOR[S.filter]]) : t("changed")) : t("date");
+  body.innerHTML = "";
+  for (const x of rows.slice(0, S.listLimit)) {
+    const tr = document.createElement("div");
+    tr.className = "erow";
+    tr.innerHTML = `<i></i><div class="em"><b></b><small></small></div><span class="es"></span><span class="ed"></span>`;
+    tr.querySelector("i").style.background = colorFor(x.v) || "#d5dbe0";
+    tr.querySelector("b").textContent = x.mark || x.product || `#${x.r}`;
+    tr.querySelector("small").textContent = x.mark ? x.product : "";
+    tr.querySelector(".es").textContent = S.filter ? "" : statusName(x.v);
+    const ed = tr.querySelector(".ed");
+    if (x.d) { ed.textContent = `${fmtDM(x.d.ms)}${new Date(x.d.ms).getUTCFullYear() % 100}`; if (!x.d.field) { ed.classList.add("soft"); ed.title = t("changedTip"); } }
+    else ed.textContent = "–";
+    tr.onclick = () => selectInModel(x.m, x.r, false);
+    tr.ondblclick = () => selectInModel(x.m, x.r, true);
+    body.appendChild(tr);
+  }
+  const more = $("listMore");
+  more.hidden = rows.length <= S.listLimit;
+  more.textContent = t("showMore", rows.length - S.listLimit);
+}
+
+async function selectInModel(m, r, zoom) {
+  const sel = { modelObjectIds: [{ modelId: m, objectRuntimeIds: [r] }] };
+  try { await S.api.viewer.setSelection(sel, "set"); } catch (e) { log(`Markering misslyckades: ${e.message}`, "e"); }
+  if (zoom) { try { await S.api.viewer.setCamera(sel, { animationTime: 400 }); } catch { /* valfritt */ } }
+  setTimeout(pollSelection, 50);
+}
+
+/** Hämta elementnummer och produktnamn för listan (i omgångar, i bakgrunden). */
+async function loadElementInfo() {
+  const todo = new Map();
+  for (const g of S.groups.values()) for (const [m, ids] of g) for (const r of ids) if (!S.elInfo.has(K(m, r))) addTo(todo, m, r);
+  const seq = (S.elSeq = (S.elSeq || 0) + 1);
+  for (const [m, ids] of todo) {
+    for (let i = 0; i < ids.length; i += 100) {
+      if (seq !== S.elSeq) return;
+      let res = [];
+      try { res = (await withTimeout(S.api.viewer.getObjectProperties(m, ids.slice(i, i + 100)))) || []; } catch { res = []; }
+      for (const o of res) {
+        if (!o) continue;
+        const mk = findProp(flatProps(o), markId());
+        S.elInfo.set(K(m, o.id), { mark: mk && mk.value != null ? String(mk.value) : "", product: (o.product && o.product.name) || o.class || "" });
+      }
+      for (const r of ids.slice(i, i + 100)) if (!S.elInfo.has(K(m, r))) S.elInfo.set(K(m, r), {});
+      renderList();
+    }
+  }
 }
 
 // ---------- Fyll i ----------
@@ -1703,12 +1853,14 @@ async function autoSetup() {
   if ($("libId").value.trim() && !S.def) await guard(loadLibrary)();
   if (S.def && !$("linkTpl").value.trim()) { try { await autoLinkTemplate(); } catch (e) { log(`Länkformat: ${e.message}`, "e"); } }
   if (!setupComplete()) openSetup(true);
+  else if (!S.groups.size) await guard(computeOverview)();
 }
 
 // ---------- UI-skal ----------
 function applyLang() {
   document.documentElement.lang = LANG;
   for (const el of document.querySelectorAll("[data-t]")) el.textContent = t(el.dataset.t);
+  for (const el of document.querySelectorAll("[data-tp]")) el.placeholder = t(el.dataset.tp);
   $("btnLang").textContent = LANG === "sv" ? "FI" : "SV";
   $("btnSetup").title = t("settings");
   renderStatusGrid(); renderCards(); setDot();
@@ -1753,8 +1905,10 @@ function resetModelCache(reason) {
   S.probed = null; S.fileIds.clear(); S.structLock = null;
   S.groups = new Map(); S.leafGroups = new Map(); S.leafInfo = new Map(); S.hidden.clear();
   if (S.tl) S.tl.painted = false;
-  S.tlDirty = true;
+  S.tlDirty = true; S.painted = false; S.elInfo = new Map();
   renderCards();
+  clearTimeout(S.recalcT);
+  S.recalcT = setTimeout(() => { if (setupComplete() && !S.groups.size) guard(computeOverview)(); }, 2500);
   log(`Modellen ändrades (${reason.replace("viewer.", "")}) – appen läser in strukturen på nytt vid nästa uppdatering.`);
 }
 
@@ -1812,8 +1966,11 @@ async function init() {
   $("btnColor").onclick = guard(colorModel);
   $("btnReset").onclick = guard(async () => {
     await S.api.viewer.setObjectState(undefined, { color: "reset", visible: "reset" });
-    S.groups = new Map(); S.leafGroups = new Map(); S.hidden.clear(); renderCards();
+    S.hidden.clear(); S.painted = false; renderCards();
   });
+  $("listClear").onclick = () => { S.filter = null; renderCards(); };
+  $("listMore").onclick = () => { S.listLimit += 300; renderList(); };
+  $("listSearch").oninput = () => { S.query = $("listSearch").value; S.listLimit = 150; renderList(); };
   $("btnWrite").onclick = guard(writeSelected);
   $("infoStatus").onclick = toggleInfoMenu;
   $("infoMeta").onclick = toggleHistory;

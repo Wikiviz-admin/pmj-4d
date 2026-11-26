@@ -1,4 +1,4 @@
-# PMJ 4D – v1.9
+# PMJ 4D – v2.0
 
 En liten Trimble Connect-extension för 3D-visaren. Den testar de tre saker som avgör om hela idén håller:
 
@@ -43,7 +43,12 @@ Panelen har två flikar och en kugghjulsknapp (⚙). FI/SV-knappen växlar språ
 
 Allt sparas per projekt i webbläsaren. ⚙ öppnas bara om något inte kunde hittas. Det händer främst i ett helt nytt projekt där inget element har status ännu. Sätt då status för hand på ett element i Connect och klicka *Hitta från markerat objekt*. Länkformatet gäller sedan för alla projekt.
 
-**Översikt:** *Uppdatera* färgar modellen efter status och visar antal per status. Klicka på ett statuskort för att dölja eller visa just de objekten.
+**Yleiskuva (översikt):** När panelen öppnas räknas läget ut direkt, utan att modellen färgas.
+- Överst visas en sammanfattning: *Asennettu 9 / 1 026*, en progressionsstapel i statusfärgerna och antal valmistettu, tuotannossa och piirustus ok.
+- *Näytä tilat* färgar modellen. Därefter heter knappen *↻ Päivitä tilat*. *Poista värit* tar bort färgerna men behåller listan.
+- Klick på ett statuskort filtrerar listan till den statusen, och ett nytt klick (eller ✕) visar alla igen. Ögat ◉ på kortet döljer eller visar statusen i modellen.
+- Listan visar elementnummer, produkt, status och datum. Med filter sorteras listan på när elementen fick statusen, senast först, enligt statusens eget datumfält (piirustukset lähetetty, valmistuspäivämäärä, asennuspäivämäärä eller suunniteltu asennuspäivä). Saknas det datumet visas senaste ändringen i kursiv stil.
+- Klick på en rad markerar elementet i 3D, och dubbelklick zoomar dit. Sökfältet filtrerar på elementnummer och produkt.
 
 **Fyll i:** Markera objekt i 3D, klicka på en status och lägg eventuellt till ett datum. Klicka sedan *Tallenna*. Värdena sparas direkt och modellen färgas om.
 
